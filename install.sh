@@ -250,6 +250,10 @@ install_systemd_services() {
     mkdir -p "$SYSTEMD_DIR"
     TTYD_BIN="$(command -v ttyd || true)"
 
+    if command -v systemctl &>/dev/null && systemctl list-unit-files ttyd.service >/dev/null 2>&1; then
+        sudo systemctl disable --now ttyd.service >/dev/null 2>&1 || true
+    fi
+
     # ── fr33d0m-webui ────────────────────────────────────────────────────
     cat > "$SYSTEMD_DIR/fr33d0m-webui.service" << UNIT
 [Unit]
