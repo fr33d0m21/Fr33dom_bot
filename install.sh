@@ -328,6 +328,10 @@ UNIT
     fi
 
     # Reload and enable
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+    fi
     systemctl --user daemon-reload
 
     systemctl --user enable fr33d0m-webui.service    2>/dev/null && ok "fr33d0m-webui    → enabled (autostart)" || warn "fr33d0m-webui enable failed"
