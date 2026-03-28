@@ -1613,10 +1613,10 @@ index 0000000..1ad0d9a
 +    message: str
 +    missing_fields: list[str] = Field(default_factory=list)
 diff --git a/webui/server.py b/webui/server.py
-index e9c6003..8a53084 100644
+index e9c6003..6db3408 100644
 --- a/webui/server.py
 +++ b/webui/server.py
-@@ -1,41 +1,135 @@
+@@ -1,41 +1,140 @@
 -"""FastAPI application factory for Hermes WebUI."""
 +"""FastAPI application factory for the Fr33d0m dashboard."""
  
@@ -1708,14 +1708,19 @@ index e9c6003..8a53084 100644
 +        await websocket.close(code=4401, reason="Authentication required")
 +        return
 +
-+    await websocket.accept()
-+
 +    target = TTYD_TARGETS[target_key]
 +    upstream_url = f"{target['ws']}{websocket.url.path}"
 +    if websocket.url.query:
 +        upstream_url = f"{upstream_url}?{websocket.url.query}"
 +
-+    async with websockets.connect(upstream_url) as upstream:
++    client_subprotocols = list(websocket.scope.get("subprotocols") or [])
++    connect_kwargs: dict[str, object] = {}
++    if client_subprotocols:
++        connect_kwargs["subprotocols"] = client_subprotocols
++
++    async with websockets.connect(upstream_url, **connect_kwargs) as upstream:
++        await websocket.accept(subprotocol=upstream.subprotocol)
++
 +        async def client_to_upstream() -> None:
 +            while True:
 +                message = await websocket.receive()
@@ -1762,7 +1767,7 @@ index e9c6003..8a53084 100644
      await bridge.stop()
  
  
-@@ -44,13 +138,12 @@ def create_app() -> FastAPI:
+@@ -44,13 +143,12 @@ def create_app() -> FastAPI:
      config = get_webui_config()
  
      app = FastAPI(
@@ -1778,7 +1783,7 @@ index e9c6003..8a53084 100644
      app.add_middleware(
          CORSMiddleware,
          allow_origins=config.cors_origins,
-@@ -59,27 +152,47 @@ def create_app() -> FastAPI:
+@@ -59,27 +157,47 @@ def create_app() -> FastAPI:
          allow_headers=["*"],
      )
  
@@ -1834,7 +1839,7 @@ index e9c6003..8a53084 100644
              raw = await websocket.receive_text()
              try:
                  msg = json.loads(raw)
-@@ -96,17 +209,14 @@ def create_app() -> FastAPI:
+@@ -96,17 +214,14 @@ def create_app() -> FastAPI:
                  await websocket.close(code=4003, reason="Invalid token")
                  return
  
@@ -1852,7 +1857,7 @@ index e9c6003..8a53084 100644
                  try:
                      msg = json.loads(data)
                      if msg.get("type") == "ping":
-@@ -122,19 +232,14 @@ def create_app() -> FastAPI:
+@@ -122,19 +237,14 @@ def create_app() -> FastAPI:
          finally:
              await hub.disconnect(websocket)
  

@@ -160,7 +160,15 @@ apply_webui_patch() {
     elif git -C "$target_dir" apply --reverse --check "$patch_file" 2>/dev/null; then
         ok "Fr33d0m dashboard patch already applied"
     else
-        warn "Could not apply Fr33d0m dashboard patch automatically"
+        warn "Dashboard patch state diverged; resetting managed hermes-webui clone to upstream HEAD"
+        git -C "$target_dir" reset --hard HEAD >/dev/null 2>&1 || true
+        git -C "$target_dir" clean -fd >/dev/null 2>&1 || true
+        if git -C "$target_dir" apply --check "$patch_file" 2>/dev/null; then
+            git -C "$target_dir" apply --whitespace=nowarn "$patch_file"
+            ok "Re-applied Fr33d0m dashboard patch after reset"
+        else
+            warn "Could not apply Fr33d0m dashboard patch automatically"
+        fi
     fi
 }
 
