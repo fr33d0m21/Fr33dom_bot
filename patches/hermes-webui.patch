@@ -2261,12 +2261,52 @@ index e1a538d..07fc8a3 100644
 -    return token == expected
 +    supplied = token or websocket.cookies.get("fr33d0m_webui_token") or websocket.cookies.get("hermes_webui_token")
 +    return bool(supplied and supplied == expected)
+diff --git a/webui/hermes_bridge.py b/webui/hermes_bridge.py
+index 91025e8..a5e566c 100644
+--- a/webui/hermes_bridge.py
++++ b/webui/hermes_bridge.py
+@@ -383,10 +383,12 @@ def _replace_nested(lines: list, parent: str, child: str, value: Any, path: "Pat
+     new_lines = []
+     in_section = False
+     found = False
++    parent_found = False
+     for line in lines:
+         # Detect parent section start
+         if re.match(rf"^{re.escape(parent)}\s*:", line):
+             in_section = True
++            parent_found = True
+             new_lines.append(line)
+             continue
+         # Detect next top-level key (end of section)
+@@ -402,10 +404,18 @@ def _replace_nested(lines: list, parent: str, child: str, value: Any, path: "Pat
+         new_lines.append(line)
+     if not found:
+         # Append to section (find it and add after)
+-        for i, line in enumerate(new_lines):
+-            if re.match(rf"^{re.escape(parent)}\s*:", line):
+-                new_lines.insert(i + 1, f"  {child}: {_yaml_scalar(value)}\n")
+-                break
++        if parent_found:
++            for i, line in enumerate(new_lines):
++                if re.match(rf"^{re.escape(parent)}\s*:", line):
++                    new_lines.insert(i + 1, f"  {child}: {_yaml_scalar(value)}\n")
++                    break
++        else:
++            if new_lines and not new_lines[-1].endswith("\n"):
++                new_lines[-1] = new_lines[-1] + "\n"
++            if new_lines and new_lines[-1].strip():
++                new_lines.append("\n")
++            new_lines.append(f"{parent}:\n")
++            new_lines.append(f"  {child}: {_yaml_scalar(value)}\n")
+     path.write_text("".join(new_lines), encoding="utf-8")
+ 
+ 
 diff --git a/webui/routers/admin_actions.py b/webui/routers/admin_actions.py
 new file mode 100644
-index 0000000..e9fc467
+index 0000000..112bd39
 --- /dev/null
 +++ b/webui/routers/admin_actions.py
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,179 @@
 +"""Allowlisted admin action endpoints for the dashboard."""
 +
 +from __future__ import annotations
@@ -2321,6 +2361,17 @@ index 0000000..e9fc467
 +    raise HTTPException(status_code=500, detail="Could not locate fr33d0m/hermes CLI")
 +
 +
++def _preferred_gateway_service_name() -> str | None:
++    runtime_home = Path.home()
++    custom_unit = runtime_home / ".config" / "systemd" / "user" / "fr33d0m-gateway.service"
++    default_unit = runtime_home / ".config" / "systemd" / "user" / "hermes-gateway.service"
++    if custom_unit.exists():
++        return "fr33d0m-gateway.service"
++    if default_unit.exists():
++        return "hermes-gateway.service"
++    return None
++
++
 +def _run_cli(action: str, args: list[str], timeout: int = 180) -> CommandActionResponse:
 +    cmd = [_cli_command(), *args]
 +    result = subprocess.run(
@@ -2339,6 +2390,28 @@ index 0000000..e9fc467
 +    )
 +
 +
++def _run_gateway_service(action: str) -> CommandActionResponse:
++    service_name = _preferred_gateway_service_name()
++    if not service_name:
++        return _run_cli(f"gateway:{action}", ["gateway", action])
++
++    env = _runtime_env()
++    result = subprocess.run(
++        ["systemctl", "--user", action, service_name],
++        capture_output=True,
++        text=True,
++        env=env,
++        timeout=120,
++    )
++    return CommandActionResponse(
++        success=result.returncode == 0,
++        action=f"gateway:{action}",
++        exit_code=result.returncode,
++        stdout=result.stdout,
++        stderr=result.stderr,
++    )
++
++
 +def _pairing_store():
 +    init_hermes_path()
 +    from gateway.pairing import PairingStore
@@ -2348,17 +2421,17 @@ index 0000000..e9fc467
 +
 +@router.post("/gateway/start", response_model=CommandActionResponse)
 +async def gateway_start() -> CommandActionResponse:
-+    return _run_cli("gateway:start", ["gateway", "start"])
++    return _run_gateway_service("start")
 +
 +
 +@router.post("/gateway/stop", response_model=CommandActionResponse)
 +async def gateway_stop() -> CommandActionResponse:
-+    return _run_cli("gateway:stop", ["gateway", "stop"])
++    return _run_gateway_service("stop")
 +
 +
 +@router.post("/gateway/restart", response_model=CommandActionResponse)
 +async def gateway_restart() -> CommandActionResponse:
-+    return _run_cli("gateway:restart", ["gateway", "restart"])
++    return _run_gateway_service("restart")
 +
 +
 +@router.post("/doctor", response_model=CommandActionResponse)
