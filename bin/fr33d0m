@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# fr33d0m — branded wrapper for Hermes Agent
+# All arguments pass through directly to the hermes CLI.
+#
+# Usage:
+#   fr33d0m              Start chatting
+#   fr33d0m setup        Configure API keys
+#   fr33d0m model        Choose LLM provider/model
+#   fr33d0m tools        Configure tools
+#   fr33d0m doctor       Diagnose issues
+#   fr33d0m gateway      Messaging gateway (Telegram, Discord, etc.)
+#   fr33d0m update       Update Hermes Agent
+#   fr33d0m config show  Show current configuration
+#   fr33d0m skills list  Browse available skills
+#   fr33d0m --help       Full command reference
+
+HERMES_CMD="$HOME/.local/bin/hermes"
+
+if [ ! -f "$HERMES_CMD" ]; then
+    HERMES_CMD="$(command -v hermes 2>/dev/null || true)"
+fi
+
+if [ -z "$HERMES_CMD" ] || [ ! -x "$HERMES_CMD" ]; then
+    echo "Error: hermes not found. Run the Fr33dom Bot installer first."
+    echo "  git clone https://github.com/fr33d0m21/Fr33dom_bot.git && cd Fr33dom_bot && bash install.sh"
+    exit 1
+fi
+
+exec "$HERMES_CMD" "$@"

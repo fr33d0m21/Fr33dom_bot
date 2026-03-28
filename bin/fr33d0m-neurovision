@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# fr33d0m-neurovision — branded wrapper for Hermes Neurovision
+PYTHONPATH="$HOME/.hermes/extensions/hermes-neurovision" \
+    exec "$HOME/.hermes/hermes-agent/venv/bin/python" -m hermes_neurovision.cli "$@"

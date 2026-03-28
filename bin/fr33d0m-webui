@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# fr33d0m-webui — branded wrapper for Hermes WebUI
+cd "$HOME/.hermes/extensions/hermes-webui"
+exec ./venv/bin/python -m webui "$@"

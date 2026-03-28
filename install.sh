@@ -5,68 +5,114 @@ BOLD='\033[1m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
+RED='\033[0;31m'
 RESET='\033[0m'
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_BIN="$HOME/.local/bin"
+CURRENT_USER="$(whoami)"
 
 info()  { printf "${CYAN}→${RESET} %s\n" "$1"; }
 ok()    { printf "${GREEN}✓${RESET} %s\n" "$1"; }
 warn()  { printf "${YELLOW}⚠${RESET} %s\n" "$1"; }
+fail()  { printf "${RED}✗${RESET} %s\n" "$1"; }
 
-echo -e "${BOLD}"
-echo '┌─────────────────────────────────────────────────────────┐'
-echo '│            Fr33d0m Bot — Installer                      │'
-echo '│  Custom Hermes Agent with extensions & fr33d0m-skin     │'
-echo '└─────────────────────────────────────────────────────────┘'
+echo -e "${BOLD}${GREEN}"
+cat << 'BANNER'
+
+  ███████╗██████╗ ██████╗ ██████╗ ██████╗  ██████╗ ███╗   ███╗
+  ██╔════╝██╔══██╗╚════██╗╚════██╗██╔══██╗██╔═══██╗████╗ ████║
+  █████╗  ██████╔╝ █████╔╝ █████╔╝██║  ██║██║   ██║██╔████╔██║
+  ██╔══╝  ██╔══██╗ ╚═══██╗ ╚═══██╗██║  ██║██║   ██║██║╚██╔╝██║
+  ██║     ██║  ██║██████╔╝██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║
+  ╚═╝     ╚═╝  ╚═╝╚═════╝ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝
+
+BANNER
 echo -e "${RESET}"
+echo -e "${BOLD}  Custom Hermes Agent · Ubuntu Edition${RESET}"
+echo ""
 
-# ─── Step 1: Install Hermes Agent (if not present) ───────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 1: System prerequisites (Ubuntu)
+# ═════════════════════════════════════════════════════════════════════════════
+
+info "Checking system prerequisites..."
+
+install_system_deps() {
+    local missing=()
+    command -v git    &>/dev/null || missing+=(git)
+    command -v curl   &>/dev/null || missing+=(curl)
+    command -v rg     &>/dev/null || missing+=(ripgrep)
+    command -v ffmpeg &>/dev/null || missing+=(ffmpeg)
+    command -v npm    &>/dev/null || missing+=(nodejs npm)
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        info "Installing system packages: ${missing[*]}"
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq "${missing[@]}"
+    fi
+    ok "System dependencies ready"
+}
+
+install_uv() {
+    if ! command -v uv &>/dev/null; then
+        info "Installing uv package manager..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$HOME/.local/bin:$PATH"
+    fi
+    ok "uv ready ($(uv --version 2>/dev/null || echo 'installed'))"
+}
+
+install_system_deps
+install_uv
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 2: Install Hermes Agent core
+# ═════════════════════════════════════════════════════════════════════════════
 
 if [ -d "$HERMES_HOME/hermes-agent" ]; then
-    ok "Hermes Agent already installed at $HERMES_HOME/hermes-agent"
+    ok "Hermes Agent already installed"
 else
-    info "Installing Hermes Agent..."
+    info "Installing Hermes Agent (this may take a few minutes)..."
     curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
     ok "Hermes Agent installed"
 fi
 
-# ─── Step 2: Ensure directories ──────────────────────────────────────────────
+# Reload PATH in case hermes installer added ~/.local/bin
+export PATH="$HOME/.local/bin:$PATH"
 
-mkdir -p "$HERMES_HOME/skins"
-mkdir -p "$HERMES_HOME/plugins"
-mkdir -p "$HERMES_HOME/prisms"
-mkdir -p "$HERMES_HOME/skills"
-mkdir -p "$HERMES_HOME/extensions"
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 3: Directory structure
+# ═════════════════════════════════════════════════════════════════════════════
+
+mkdir -p "$HERMES_HOME"/{skins,plugins,prisms,skills,extensions}
+mkdir -p "$LOCAL_BIN"
 ok "Directory structure ready"
 
-# ─── Step 3: Copy custom skin ────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 4: Fr33d0m customizations (skin, config, persona, plugins, skills)
+# ═════════════════════════════════════════════════════════════════════════════
 
 cp "$SCRIPT_DIR/skins/fr33d0m-skin.yaml" "$HERMES_HOME/skins/"
 ok "Installed fr33d0m-skin"
-
-# ─── Step 4: Copy config + persona ───────────────────────────────────────────
 
 cp "$SCRIPT_DIR/config/config.yaml" "$HERMES_HOME/config.yaml"
 cp "$SCRIPT_DIR/config/SOUL.md" "$HERMES_HOME/SOUL.md"
 ok "Config and persona installed"
 
-# ─── Step 5: Copy plugins ────────────────────────────────────────────────────
-
 cp -r "$SCRIPT_DIR/plugins/"* "$HERMES_HOME/plugins/" 2>/dev/null || true
-ok "Installed $(ls -d "$HERMES_HOME/plugins/evey-"* 2>/dev/null | wc -l | tr -d ' ') evey plugins + skill_factory"
-
-# ─── Step 6: Copy custom skills ──────────────────────────────────────────────
+ok "Installed plugins ($(ls -d "$HERMES_HOME/plugins/evey-"* 2>/dev/null | wc -l) evey + skill_factory)"
 
 cp -r "$SCRIPT_DIR/skills/"* "$HERMES_HOME/skills/"
-ok "Installed custom skills (execplan, life-os, prism-*, skill-factory)"
-
-# ─── Step 7: Copy prisms ─────────────────────────────────────────────────────
+ok "Installed custom skills"
 
 cp -r "$SCRIPT_DIR/prisms/"* "$HERMES_HOME/prisms/"
-ok "Installed $(ls "$HERMES_HOME/prisms/"*.md 2>/dev/null | wc -l | tr -d ' ') analytical prisms"
+ok "Installed $(ls "$HERMES_HOME/prisms/"*.md 2>/dev/null | wc -l) analytical prisms"
 
-# ─── Step 8: Clone extension repos ───────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 5: Clone extension repos
+# ═════════════════════════════════════════════════════════════════════════════
 
 EXTENSIONS=(
     "https://github.com/NousResearch/hermes-agent-self-evolution.git"
@@ -85,68 +131,218 @@ for repo_url in "${EXTENSIONS[@]}"; do
         ok "Extension $repo_name already cloned"
     else
         info "Cloning $repo_name..."
-        git clone "$repo_url" "$HERMES_HOME/extensions/$repo_name" 2>/dev/null
+        git clone --depth 1 "$repo_url" "$HERMES_HOME/extensions/$repo_name" 2>/dev/null
         ok "Cloned $repo_name"
     fi
 done
 
-# ─── Step 9: Install self-evolution (Python package) ─────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 6: Install Python packages into Hermes venv
+# ═════════════════════════════════════════════════════════════════════════════
 
 HERMES_PYTHON="$HERMES_HOME/hermes-agent/venv/bin/python"
-if [ -f "$HERMES_PYTHON" ] && command -v uv &>/dev/null; then
-    info "Installing hermes-agent-self-evolution into Hermes venv..."
+
+if [ -f "$HERMES_PYTHON" ]; then
+    info "Installing self-evolution into Hermes venv..."
     uv pip install -e "$HERMES_HOME/extensions/hermes-agent-self-evolution[dev]" \
-        --python "$HERMES_PYTHON" 2>/dev/null && ok "self-evolution installed" || warn "self-evolution install failed (non-critical)"
+        --python "$HERMES_PYTHON" 2>/dev/null \
+        && ok "self-evolution installed" \
+        || warn "self-evolution install failed (non-critical)"
 fi
 
-# ─── Step 10: Install neurovision wrapper ─────────────────────────────────────
-
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/hermes-neurovision" << 'WRAPPER'
-#!/bin/bash
-PYTHONPATH="$HOME/.hermes/extensions/hermes-neurovision" exec "$HOME/.hermes/hermes-agent/venv/bin/python" -m hermes_neurovision.cli "$@"
-WRAPPER
-chmod +x "$HOME/.local/bin/hermes-neurovision"
-ok "hermes-neurovision command installed"
-
-# ─── Step 11: Install webui ──────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 7: Install WebUI (own venv + frontend build)
+# ═════════════════════════════════════════════════════════════════════════════
 
 WEBUI_DIR="$HERMES_HOME/extensions/hermes-webui"
-if [ -d "$WEBUI_DIR" ] && command -v uv &>/dev/null; then
+if [ -d "$WEBUI_DIR" ]; then
     if [ ! -d "$WEBUI_DIR/venv" ]; then
-        info "Setting up hermes-webui..."
+        info "Setting up WebUI Python environment..."
         uv venv "$WEBUI_DIR/venv" --python 3.11 2>/dev/null
         uv pip install -e "$WEBUI_DIR" --python "$WEBUI_DIR/venv/bin/python" 2>/dev/null
+        ok "WebUI backend installed"
+    else
+        ok "WebUI backend already set up"
     fi
     if [ -d "$WEBUI_DIR/frontend" ] && command -v npm &>/dev/null; then
-        (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
+        if [ ! -d "$WEBUI_DIR/frontend/dist" ]; then
+            info "Building WebUI frontend..."
+            (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
+            ok "WebUI frontend built"
+        else
+            ok "WebUI frontend already built"
+        fi
     fi
-    cat > "$HOME/.local/bin/hermes-webui" << 'WRAPPER'
-#!/bin/bash
-cd "$HOME/.hermes/extensions/hermes-webui"
-exec ./venv/bin/python -m webui "$@"
-WRAPPER
-    chmod +x "$HOME/.local/bin/hermes-webui"
-    ok "hermes-webui command installed"
 fi
 
-# ─── Step 12: .env reminder ──────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 8: Install fr33d0m commands
+# ═════════════════════════════════════════════════════════════════════════════
 
-if [ ! -f "$HERMES_HOME/.env" ] || ! grep -q "OPENROUTER_API_KEY=." "$HERMES_HOME/.env" 2>/dev/null; then
-    echo ""
-    warn "No API key configured yet."
-    echo "  Add your key to $HERMES_HOME/.env"
-    echo "  Or run: hermes setup"
+info "Installing fr33d0m commands..."
+
+cp "$SCRIPT_DIR/bin/fr33d0m"              "$LOCAL_BIN/fr33d0m"
+cp "$SCRIPT_DIR/bin/fr33d0m-webui"        "$LOCAL_BIN/fr33d0m-webui"
+cp "$SCRIPT_DIR/bin/fr33d0m-neurovision"  "$LOCAL_BIN/fr33d0m-neurovision"
+chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision"
+
+# Also keep hermes-* aliases for compatibility
+ln -sf "$LOCAL_BIN/fr33d0m-webui"        "$LOCAL_BIN/hermes-webui"
+ln -sf "$LOCAL_BIN/fr33d0m-neurovision"  "$LOCAL_BIN/hermes-neurovision"
+
+ok "Installed: fr33d0m, fr33d0m-webui, fr33d0m-neurovision"
+
+# Ensure ~/.local/bin is on PATH
+if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then
+    SHELL_RC=""
+    if [ -f "$HOME/.bashrc" ]; then
+        SHELL_RC="$HOME/.bashrc"
+    elif [ -f "$HOME/.zshrc" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    elif [ -f "$HOME/.profile" ]; then
+        SHELL_RC="$HOME/.profile"
+    fi
+    if [ -n "$SHELL_RC" ]; then
+        if ! grep -q 'local/bin' "$SHELL_RC" 2>/dev/null; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+            ok "Added ~/.local/bin to PATH in $SHELL_RC"
+        fi
+    fi
+    export PATH="$LOCAL_BIN:$PATH"
 fi
 
-# ─── Done ─────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 9: systemd services (autostart on boot)
+# ═════════════════════════════════════════════════════════════════════════════
+
+install_systemd_services() {
+    info "Setting up systemd services for autostart..."
+
+    local SYSTEMD_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SYSTEMD_DIR"
+
+    # ── fr33d0m-webui ────────────────────────────────────────────────────
+    cat > "$SYSTEMD_DIR/fr33d0m-webui.service" << UNIT
+[Unit]
+Description=Fr33d0m WebUI Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HERMES_HOME=$HERMES_HOME
+WorkingDirectory=$HERMES_HOME/extensions/hermes-webui
+ExecStart=$HERMES_HOME/extensions/hermes-webui/venv/bin/python -m webui --port 8643
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+
+    # ── fr33d0m-gateway ──────────────────────────────────────────────────
+    cat > "$SYSTEMD_DIR/fr33d0m-gateway.service" << UNIT
+[Unit]
+Description=Fr33d0m Messaging Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HERMES_HOME=$HERMES_HOME
+Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=$HERMES_HOME/hermes-agent
+ExecStart=$LOCAL_BIN/hermes gateway start
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+
+    # ── fr33d0m-neurovision ──────────────────────────────────────────────
+    cat > "$SYSTEMD_DIR/fr33d0m-neurovision.service" << UNIT
+[Unit]
+Description=Fr33d0m Neurovision Daemon
+After=network.target
+
+[Service]
+Type=simple
+Environment=HERMES_HOME=$HERMES_HOME
+Environment=PYTHONPATH=$HERMES_HOME/extensions/hermes-neurovision
+ExecStart=$HERMES_HOME/hermes-agent/venv/bin/python -m hermes_neurovision.cli --daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+
+    # Reload and enable
+    systemctl --user daemon-reload
+
+    systemctl --user enable fr33d0m-webui.service    2>/dev/null && ok "fr33d0m-webui    → enabled (autostart)" || warn "fr33d0m-webui enable failed"
+    systemctl --user enable fr33d0m-gateway.service  2>/dev/null && ok "fr33d0m-gateway  → enabled (autostart)" || warn "fr33d0m-gateway enable failed"
+    systemctl --user enable fr33d0m-neurovision.service 2>/dev/null && ok "fr33d0m-neurovision → enabled (autostart)" || warn "fr33d0m-neurovision enable failed"
+
+    # Enable lingering so user services run without a login session
+    if command -v loginctl &>/dev/null; then
+        sudo loginctl enable-linger "$CURRENT_USER" 2>/dev/null \
+            && ok "Lingering enabled — services run at boot without login" \
+            || warn "Could not enable lingering (services will only run when logged in)"
+    fi
+
+    # Start webui now
+    systemctl --user start fr33d0m-webui.service 2>/dev/null \
+        && ok "fr33d0m-webui started on port 8643" \
+        || warn "fr33d0m-webui could not start now (will start on next boot)"
+}
+
+if command -v systemctl &>/dev/null; then
+    install_systemd_services
+else
+    warn "systemd not found — skipping autostart setup"
+    warn "You can start services manually:"
+    echo "    fr33d0m-webui --port 8643 &"
+    echo "    fr33d0m gateway start &"
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Phase 10: .env setup
+# ═════════════════════════════════════════════════════════════════════════════
+
+if [ ! -f "$HERMES_HOME/.env" ]; then
+    cp "$SCRIPT_DIR/.env.example" "$HERMES_HOME/.env"
+    ok "Created ~/.hermes/.env from template"
+elif ! grep -q "OPENROUTER_API_KEY=." "$HERMES_HOME/.env" 2>/dev/null; then
+    warn "No API key configured yet"
+fi
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Done
+# ═════════════════════════════════════════════════════════════════════════════
 
 echo ""
-echo -e "${BOLD}┌─────────────────────────────────────────────────────────┐${RESET}"
-echo -e "${BOLD}│  ${GREEN}Fr33d0m Bot is ready!${RESET}${BOLD}                                   │${RESET}"
-echo -e "${BOLD}├─────────────────────────────────────────────────────────┤${RESET}"
-echo -e "${BOLD}│${RESET}  hermes                  Start chatting                ${BOLD}│${RESET}"
-echo -e "${BOLD}│${RESET}  hermes setup             Configure API keys           ${BOLD}│${RESET}"
-echo -e "${BOLD}│${RESET}  hermes-neurovision       Terminal visualizer           ${BOLD}│${RESET}"
-echo -e "${BOLD}│${RESET}  hermes-webui --localhost  Web dashboard                ${BOLD}│${RESET}"
-echo -e "${BOLD}└─────────────────────────────────────────────────────────┘${RESET}"
+echo -e "${BOLD}${GREEN}┌─────────────────────────────────────────────────────────────┐${RESET}"
+echo -e "${BOLD}${GREEN}│                                                             │${RESET}"
+echo -e "${BOLD}${GREEN}│   Fr33d0m Bot is ready!                                     │${RESET}"
+echo -e "${BOLD}${GREEN}│                                                             │${RESET}"
+echo -e "${BOLD}${GREEN}├─────────────────────────────────────────────────────────────┤${RESET}"
+echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m${RESET}                    Start chatting               ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m setup${RESET}              Configure API keys           ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m model${RESET}              Choose LLM model             ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m doctor${RESET}             Diagnose issues              ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m gateway start${RESET}      Start messaging gateway      ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-neurovision${RESET}        Terminal visualizer           ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-webui${RESET}              Web dashboard (:8643)        ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
+echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
+echo -e "${BOLD}│${RESET}  Services (autostart on boot):                              ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-webui                    ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-gateway                  ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-neurovision              ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${YELLOW}Next: run 'source ~/.bashrc' then 'fr33d0m setup'${RESET}          ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
+echo -e "${BOLD}${GREEN}└─────────────────────────────────────────────────────────────┘${RESET}"

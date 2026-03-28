@@ -1,0 +1,18 @@
+[Unit]
+Description=Fr33d0m WebUI Dashboard
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=HERMES_HOME=%h/.hermes
+WorkingDirectory=%h/.hermes/extensions/hermes-webui
+ExecStart=%h/.hermes/extensions/hermes-webui/venv/bin/python -m webui --port 8643
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

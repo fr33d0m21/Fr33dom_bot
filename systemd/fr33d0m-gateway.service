@@ -1,0 +1,18 @@
+[Unit]
+Description=Fr33d0m Messaging Gateway (Telegram, Discord, Slack, etc.)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=HERMES_HOME=%h/.hermes
+WorkingDirectory=%h/.hermes/hermes-agent
+ExecStart=%h/.local/bin/hermes gateway start
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
