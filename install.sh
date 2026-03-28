@@ -49,7 +49,15 @@ install_system_deps() {
     command -v npm    &>/dev/null || missing+=(nodejs npm)
 
     if [ ${#missing[@]} -gt 0 ]; then
+        local wait_round=0
         info "Installing system packages: ${missing[*]}"
+        while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+            wait_round=$((wait_round + 1))
+            if [ $wait_round -eq 1 ] || [ $((wait_round % 6)) -eq 0 ]; then
+                warn "apt is busy (usually unattended-upgrades on first boot). Waiting for the lock to clear..."
+            fi
+            sleep 10
+        done
         sudo apt-get update -qq
         sudo apt-get install -y -qq "${missing[@]}"
     fi
