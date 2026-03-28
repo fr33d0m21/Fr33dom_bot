@@ -16,4 +16,7 @@ for _ in $(seq 1 120); do
   sleep 0.05
 done
 
-exec "$HOME/.local/bin/fr33d0m-neurovision" --gallery
+# Neurovision's gallery mode requires stdin to be a real tty. Under ttyd,
+# wrapping the command with script(1) gives it a proper PTY for both stdin
+# and stdout while still streaming the screen back to the browser.
+exec script -q /dev/null -c "$HOME/.local/bin/fr33d0m-neurovision --gallery"
