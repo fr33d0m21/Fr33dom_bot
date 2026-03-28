@@ -358,10 +358,10 @@ index 5cc0111..f8a1002 100644
    data: Record<string, unknown>
 diff --git a/frontend/src/components/admin/EmbeddedTtyView.tsx b/frontend/src/components/admin/EmbeddedTtyView.tsx
 new file mode 100644
-index 0000000..c3a8c4f
+index 0000000..89f664b
 --- /dev/null
 +++ b/frontend/src/components/admin/EmbeddedTtyView.tsx
-@@ -0,0 +1,100 @@
+@@ -0,0 +1,102 @@
 +import { useMemo, useState } from 'react'
 +import { Link, useSearchParams } from 'react-router-dom'
 +
@@ -369,12 +369,14 @@ index 0000000..c3a8c4f
 +  title,
 +  description,
 +  routeBase,
++  proxyBase,
 +  accentLabel,
 +  commands,
 +}: {
 +  title: string
 +  description: string
 +  routeBase: '/terminal' | '/neurovision'
++  proxyBase: '/terminal-proxy' | '/neurovision-proxy'
 +  accentLabel: string
 +  commands: Array<{ label: string; command: string }>
 +}) {
@@ -382,7 +384,7 @@ index 0000000..c3a8c4f
 +  const standalone = searchParams.get('standalone') === '1'
 +  const [frameKey, setFrameKey] = useState(0)
 +
-+  const iframeSrc = useMemo(() => `${routeBase}/`, [routeBase])
++  const iframeSrc = useMemo(() => `${proxyBase}/`, [proxyBase])
 +  const standaloneHref = `${routeBase}?standalone=1`
 +
 +  return (
@@ -1761,10 +1763,10 @@ index 0000000..9cbec35
 +}
 diff --git a/frontend/src/pages/Neurovision.tsx b/frontend/src/pages/Neurovision.tsx
 new file mode 100644
-index 0000000..57066e5
+index 0000000..e964856
 --- /dev/null
 +++ b/frontend/src/pages/Neurovision.tsx
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +import { EmbeddedTtyView } from '../components/admin/EmbeddedTtyView'
 +
 +export function Neurovision() {
@@ -1773,6 +1775,7 @@ index 0000000..57066e5
 +      title="Neurovision"
 +      description="Watch the Fr33d0m visualizer in-browser. Use Reconnect if the visual session drops or you want a fresh launch."
 +      routeBase="/neurovision"
++      proxyBase="/neurovision-proxy"
 +      accentLabel="Visualize"
 +      commands={[
 +        { label: 'Gallery mode', command: 'fr33d0m-neurovision --gallery' },
@@ -2186,10 +2189,10 @@ index 89acabb..eb93779 100644
    content,
 diff --git a/frontend/src/pages/Terminal.tsx b/frontend/src/pages/Terminal.tsx
 new file mode 100644
-index 0000000..3be541b
+index 0000000..e56ea6a
 --- /dev/null
 +++ b/frontend/src/pages/Terminal.tsx
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +import { EmbeddedTtyView } from '../components/admin/EmbeddedTtyView'
 +
 +export function Terminal() {
@@ -2198,6 +2201,7 @@ index 0000000..3be541b
 +      title="Fr33d0m Terminal"
 +      description="Full browser shell access for Fr33d0m. Use it to run chat, setup, gateway, pairing, and any other operator commands."
 +      routeBase="/terminal"
++      proxyBase="/terminal-proxy"
 +      accentLabel="Control"
 +      commands={[
 +        { label: 'Start chat', command: 'fr33d0m' },
@@ -3167,7 +3171,7 @@ index 0000000..4973944
 +    path: str
 +    message: str
 diff --git a/webui/server.py b/webui/server.py
-index e9c6003..d21ef62 100644
+index e9c6003..0466af1 100644
 --- a/webui/server.py
 +++ b/webui/server.py
 @@ -1,41 +1,137 @@
@@ -3350,26 +3354,26 @@ index e9c6003..d21ef62 100644
      app.include_router(cron.router)
  
 -    # WebSocket endpoint
-+    @app.api_route("/terminal", methods=["GET", "HEAD", "OPTIONS"])
-+    @app.api_route("/terminal/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/terminal-proxy", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/terminal-proxy/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
 +    async def terminal_proxy(request: Request, path: str = "", _: str = Depends(require_auth)):
 +        del path
 +        return await _proxy_http(request, "terminal")
 +
-+    @app.api_route("/neurovision", methods=["GET", "HEAD", "OPTIONS"])
-+    @app.api_route("/neurovision/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/neurovision-proxy", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/neurovision-proxy/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
 +    async def neurovision_proxy(request: Request, path: str = "", _: str = Depends(require_auth)):
 +        del path
 +        return await _proxy_http(request, "neurovision")
 +
-+    @app.websocket("/terminal/ws")
++    @app.websocket("/terminal-proxy/ws")
 +    async def terminal_websocket_proxy(websocket: WebSocket):
 +        try:
 +            await _proxy_websocket(websocket, "terminal")
 +        except (WebSocketDisconnect, ConnectionClosed):
 +            pass
 +
-+    @app.websocket("/neurovision/ws")
++    @app.websocket("/neurovision-proxy/ws")
 +    async def neurovision_websocket_proxy(websocket: WebSocket):
 +        try:
 +            await _proxy_websocket(websocket, "neurovision")

@@ -8,7 +8,7 @@ Type=simple
 User=%i
 Environment=HERMES_HOME=%h/.hermes
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/ttyd -p 7681 -i lo -b /terminal -t fontSize=14 -t cursorStyle=bar %h/.local/bin/fr33d0m-terminal-shell
+ExecStart=/usr/bin/ttyd -p 7681 -i lo -b /terminal-proxy -t fontSize=14 -t cursorStyle=bar %h/.local/bin/fr33d0m-terminal-shell
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

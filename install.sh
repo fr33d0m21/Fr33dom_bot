@@ -314,7 +314,7 @@ Wants=network-online.target
 Type=simple
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
-ExecStart=$TTYD_BIN -p 7681 -i lo -b /terminal -t fontSize=14 -t cursorStyle=bar $LOCAL_BIN/fr33d0m-terminal-shell
+ExecStart=$TTYD_BIN -p 7681 -i lo -b /terminal-proxy -t fontSize=14 -t cursorStyle=bar $LOCAL_BIN/fr33d0m-terminal-shell
 Restart=on-failure
 RestartSec=10
 
@@ -331,7 +331,7 @@ After=network.target
 Type=simple
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
-ExecStart=$TTYD_BIN -p 7682 -i lo -b /neurovision -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m-neurovision --gallery'
+ExecStart=$TTYD_BIN -p 7682 -i lo -b /neurovision-proxy -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m-neurovision --gallery'
 Restart=on-failure
 RestartSec=10
 
