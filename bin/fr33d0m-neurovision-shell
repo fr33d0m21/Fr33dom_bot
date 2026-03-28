@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export TERM="${TERM:-xterm-256color}"
+
+# ttyd can launch the child before the browser has finished negotiating
+# the terminal size. Neurovision exits immediately when started against a
+# 0x0 terminal, so wait briefly for a usable PTY before launching it.
+for _ in $(seq 1 120); do
+  size="$(stty size 2>/dev/null || printf '0 0')"
+  rows="${size%% *}"
+  cols="${size##* }"
+  if [ "${rows:-0}" -gt 0 ] 2>/dev/null && [ "${cols:-0}" -gt 0 ] 2>/dev/null; then
+    break
+  fi
+  sleep 0.05
+done
+
+exec "$HOME/.local/bin/fr33d0m-neurovision" --gallery

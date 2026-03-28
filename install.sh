@@ -219,8 +219,9 @@ info "Installing fr33d0m commands..."
 cp "$SCRIPT_DIR/bin/fr33d0m"              "$LOCAL_BIN/fr33d0m"
 cp "$SCRIPT_DIR/bin/fr33d0m-webui"        "$LOCAL_BIN/fr33d0m-webui"
 cp "$SCRIPT_DIR/bin/fr33d0m-neurovision"  "$LOCAL_BIN/fr33d0m-neurovision"
+cp "$SCRIPT_DIR/bin/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-neurovision-shell"
 cp "$SCRIPT_DIR/bin/fr33d0m-terminal-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
-chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-terminal-shell"
+chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
 
 # Also keep hermes-* aliases for compatibility
 ln -sf "$LOCAL_BIN/fr33d0m-webui"        "$LOCAL_BIN/hermes-webui"
@@ -331,7 +332,7 @@ After=network.target
 Type=simple
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
-ExecStart=$TTYD_BIN -p 7682 -i lo -b /neurovision-proxy -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m-neurovision --gallery'
+ExecStart=$TTYD_BIN -p 7682 -i lo -b /neurovision-proxy -t fontSize=14 -t cursorStyle=bar $LOCAL_BIN/fr33d0m-neurovision-shell
 Restart=on-failure
 RestartSec=10
 
@@ -423,6 +424,7 @@ echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m gateway start${RESET}      Start mes
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-neurovision${RESET}        Terminal visualizer           ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-webui${RESET}              Web dashboard (:8643)        ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-terminal-shell${RESET}      Full login shell banner       ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-neurovision-shell${RESET}   Waits for tty, then launches  ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${CYAN}Dashboard routes${RESET}           /terminal  /neurovision     ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
 echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
