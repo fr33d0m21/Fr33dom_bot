@@ -1613,7 +1613,7 @@ index 0000000..1ad0d9a
 +    message: str
 +    missing_fields: list[str] = Field(default_factory=list)
 diff --git a/webui/server.py b/webui/server.py
-index e9c6003..9f2111b 100644
+index e9c6003..42e7a2b 100644
 --- a/webui/server.py
 +++ b/webui/server.py
 @@ -1,41 +1,140 @@
@@ -1678,7 +1678,7 @@ index e9c6003..9f2111b 100644
 +    return {
 +        key: value
 +        for key, value in headers.items()
-+        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "content-length"
++        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() not in {"content-length", "content-encoding"}
 +    }
 +
 +
