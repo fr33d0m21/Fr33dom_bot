@@ -8,7 +8,7 @@ Type=simple
 User=%i
 Environment=HERMES_HOME=%h/.hermes
 WorkingDirectory=%h/.hermes/hermes-agent
-ExecStart=%h/.local/bin/hermes gateway start
+ExecStart=%h/.local/bin/hermes gateway run --replace
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

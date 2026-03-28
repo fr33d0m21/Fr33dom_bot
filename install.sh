@@ -294,7 +294,7 @@ Type=simple
 Environment=HERMES_HOME=$HERMES_HOME
 Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=$HERMES_HOME/hermes-agent
-ExecStart=$LOCAL_BIN/hermes gateway start
+ExecStart=$LOCAL_BIN/hermes gateway run --replace
 Restart=on-failure
 RestartSec=10
 
