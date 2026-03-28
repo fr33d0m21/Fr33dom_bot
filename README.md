@@ -23,6 +23,10 @@ fr33d0m setup
 
 The installer handles everything: Hermes Agent, Python/Node.js dependencies, all extensions, the `fr33d0m` command, the Fr33d0m dashboard patch for `hermes-webui`, and systemd autostart services.
 
+## Documentation
+
+- [User Manual](USER_MANUAL.md)
+
 ## Commands
 
 | Command | What it does |
