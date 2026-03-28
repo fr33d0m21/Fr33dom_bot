@@ -16,7 +16,15 @@ for _ in $(seq 1 120); do
   sleep 0.05
 done
 
-# Neurovision's gallery mode requires stdin to be a real tty. Under ttyd,
-# wrapping the command with script(1) gives it a proper PTY for both stdin
-# and stdout while still streaming the screen back to the browser.
-exec script -q /dev/null -c "$HOME/.local/bin/fr33d0m-neurovision --gallery"
+# Launch through an interactive shell so Neurovision sees the same terminal
+# environment as the working browser terminal path. If Neurovision exits, keep
+# the shell open instead of causing a reconnect loop.
+rc_file="$(mktemp /tmp/fr33d0m-neurovision-rc.XXXXXX)"
+cat > "$rc_file" <<'EOF'
+clear
+fr33d0m-neurovision --gallery
+printf '\n\nNeurovision exited. Use `fr33d0m-neurovision --gallery` to relaunch.\n'
+exec bash -il
+EOF
+
+exec bash --init-file "$rc_file" -i
