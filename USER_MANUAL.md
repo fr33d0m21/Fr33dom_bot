@@ -23,6 +23,7 @@ The installer sets up:
 - Browser terminal service
 - Browser Neurovision service
 - WebUI service
+- Dashboard runtime controls and skill management
 
 ## Recommended Host
 
@@ -100,6 +101,17 @@ LLM_MODEL=anthropic/claude-opus-4.6
 
 Do not commit secrets into git.
 
+### Recommended default model
+
+The Fr33d0m dashboard is designed to set the runtime to:
+
+```text
+model.provider = openrouter
+model.default = minimax/minimax-m2.7
+```
+
+The dashboard can apply this automatically after you enter your `OPENROUTER_API_KEY`.
+
 ## Dashboard
 
 The Fr33d0m dashboard runs on port `8643`.
@@ -130,14 +142,26 @@ After logging in, these are the main routes:
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Fr33d0m Hub dashboard |
+| `/` | Fr33d0m Hub dashboard with gateway controls, doctor/fix buttons, and OpenRouter MiniMax setup |
 | `/sessions` | Browse chat sessions |
-| `/gateway` | Configure messaging gateways |
-| `/terminal` | Browser terminal for `fr33d0m` |
-| `/neurovision` | Browser view of Neurovision |
+| `/gateway` | Configure messaging gateways and pairing approvals |
+| `/terminal` | Browser terminal with reconnect controls and full shell access |
+| `/neurovision` | Browser view of Neurovision with reconnect controls |
 | `/config` | View config and environment data |
 | `/cron` | Manage scheduled jobs |
-| `/skills` | Browse available skills |
+| `/skills` | Browse built-in skills and manage custom skills |
+
+### Dashboard-first operator flow
+
+For most day-to-day administration, you can stay in the dashboard:
+
+1. Open `/`
+2. Enter your `OPENROUTER_API_KEY`
+3. Apply `minimax/minimax-m2.7`
+4. Use Start, Stop, Restart, Doctor, or Doctor Fix buttons
+5. Go to `/gateway` to configure platforms and approve/revoke pairing entries
+6. Go to `/skills` to create, edit, or delete custom skills
+7. Use `/terminal` only when you need raw shell access
 
 ## Messaging Gateways
 
@@ -155,6 +179,12 @@ The current UI supports:
 - WhatsApp
 - Signal
 - Email
+
+The dashboard also shows pending pairing requests and approved users with buttons for:
+
+- approve
+- revoke
+- clear pending
 
 ### Typical Inputs Per Platform
 
@@ -235,11 +265,14 @@ The browser terminal is available at:
 
 Use it for:
 
+- full shell access
 - interactive chat with Fr33d0m
 - running setup commands
 - gateway restarts
 - pairing flows
 - diagnostics
+
+On startup, the browser terminal shows a Fr33d0m welcome banner with common commands.
 
 ## Neurovision
 
@@ -337,6 +370,7 @@ This refreshes:
 - dashboard patch application
 - frontend build
 - service definitions
+- browser terminal shell wrapper
 
 ## Snapshot Workflow
 
@@ -363,6 +397,8 @@ Fix:
 fr33d0m setup
 ```
 
+Or use the dashboard AI setup panel on `/`.
+
 ### Dashboard login fails
 
 Cause: wrong dashboard token
@@ -378,6 +414,14 @@ fr33d0m doctor
 fr33d0m gateway restart
 journalctl --user -u fr33d0m-gateway -f
 ```
+
+You can also use the dashboard buttons on `/`:
+
+- Start
+- Stop
+- Restart
+- Doctor
+- Doctor Fix
 
 ### WhatsApp is configured but not paired
 
@@ -395,6 +439,8 @@ Check:
 systemctl --user status fr33d0m-terminal
 systemctl --user status fr33d0m-neurovision-web
 ```
+
+Then use the dashboard Reconnect button.
 
 ### WebUI is not responding
 
@@ -418,7 +464,10 @@ For a new VM:
 3. Run `bash install.sh`
 4. Run `fr33d0m setup`
 5. Log into the dashboard
-6. Configure gateways in `/gateway`
-7. Verify `/terminal` and `/neurovision`
-8. Verify services
-9. Snapshot the machine
+6. Enter `OPENROUTER_API_KEY`
+7. Apply `minimax/minimax-m2.7`
+8. Start the gateway from the dashboard
+9. Configure gateways in `/gateway`
+10. Verify `/terminal` and `/neurovision`
+11. Verify services
+12. Snapshot the machine

@@ -12,15 +12,17 @@ index 748f00f..ac6bd8f 100644
    <body>
      <div id="root"></div>
 diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
-index 3889e40..9764690 100644
+index 3889e40..73335e1 100644
 --- a/frontend/src/App.tsx
 +++ b/frontend/src/App.tsx
-@@ -1,4 +1,4 @@
+@@ -1,5 +1,5 @@
 -import { useState, useCallback } from 'react'
+-import { Routes, Route } from 'react-router-dom'
 +import { useState, useCallback, useEffect } from 'react'
- import { Routes, Route } from 'react-router-dom'
++import { Routes, Route, useLocation } from 'react-router-dom'
  import { Sidebar } from './components/layout/Sidebar'
  import { Header } from './components/layout/Header'
+ import { Dashboard } from './pages/Dashboard'
 @@ -8,6 +8,9 @@ import { SessionDetail } from './pages/SessionDetail'
  import { Config } from './pages/Config'
  import { Cron } from './pages/Cron'
@@ -53,7 +55,15 @@ index 3889e40..9764690 100644
          </button>
        </form>
      </div>
-@@ -70,6 +73,12 @@ export default function App() {
+@@ -63,6 +66,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string) => void }) {
+ }
+ 
+ export default function App() {
++  const location = useLocation()
+   const [token, setTokenState] = useState<string | null>(
+     () => sessionStorage.getItem('hermes_webui_token')
+   )
+@@ -70,6 +74,12 @@ export default function App() {
  
    const { connected } = useWebSocket(token)
  
@@ -66,18 +76,57 @@ index 3889e40..9764690 100644
    const handleLogin = useCallback((t: string) => {
      setToken(t)
      setTokenState(t)
-@@ -104,6 +113,9 @@ export default function App() {
-             <Route path="/" element={<Dashboard />} />
-             <Route path="/sessions" element={<Sessions />} />
-             <Route path="/sessions/:id" element={<SessionDetail />} />
-+            <Route path="/terminal" element={<Terminal />} />
-+            <Route path="/neurovision" element={<Neurovision />} />
-+            <Route path="/gateway" element={<Gateway />} />
-             <Route path="/config" element={<Config />} />
-             <Route path="/cron" element={<Cron />} />
-             <Route path="/skills" element={<Skills />} />
+@@ -84,11 +94,32 @@ export default function App() {
+   }, [])
+ 
+   const [sidebarOpen, setSidebarOpen] = useState(false)
++  const standaloneView =
++    (location.pathname === '/terminal' || location.pathname === '/neurovision') &&
++    new URLSearchParams(location.search).get('standalone') === '1'
+ 
+   if (!token) {
+     return <LoginForm onLogin={handleLogin} />
+   }
+ 
++  const routeTree = (
++    <Routes>
++      <Route path="/" element={<Dashboard />} />
++      <Route path="/sessions" element={<Sessions />} />
++      <Route path="/sessions/:id" element={<SessionDetail />} />
++      <Route path="/terminal" element={<Terminal />} />
++      <Route path="/neurovision" element={<Neurovision />} />
++      <Route path="/gateway" element={<Gateway />} />
++      <Route path="/config" element={<Config />} />
++      <Route path="/cron" element={<Cron />} />
++      <Route path="/skills" element={<Skills />} />
++    </Routes>
++  )
++
++  if (standaloneView) {
++    return <main className="min-h-screen">{routeTree}</main>
++  }
++
+   return (
+     <div className="flex min-h-screen md:h-screen md:overflow-hidden">
+       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+@@ -100,14 +131,7 @@ export default function App() {
+           onMenuToggle={() => setSidebarOpen((v) => !v)}
+         />
+         <main className="flex-1 overflow-y-auto">
+-          <Routes>
+-            <Route path="/" element={<Dashboard />} />
+-            <Route path="/sessions" element={<Sessions />} />
+-            <Route path="/sessions/:id" element={<SessionDetail />} />
+-            <Route path="/config" element={<Config />} />
+-            <Route path="/cron" element={<Cron />} />
+-            <Route path="/skills" element={<Skills />} />
+-          </Routes>
++          {routeTree}
+         </main>
+       </div>
+     </div>
 diff --git a/frontend/src/api/client.ts b/frontend/src/api/client.ts
-index 103ce21..d1b4693 100644
+index 103ce21..408235b 100644
 --- a/frontend/src/api/client.ts
 +++ b/frontend/src/api/client.ts
 @@ -1,21 +1,30 @@
@@ -123,7 +172,7 @@ index 103ce21..d1b4693 100644
        throw new Error('Authentication required')
      }
      const body = await res.text()
-@@ -73,6 +82,16 @@ export const api = {
+@@ -73,6 +82,50 @@ export const api = {
  
    // Gateway
    gatewayStatus: () => request<import('./types').GatewayStatus>('/gateway/status'),
@@ -137,14 +186,76 @@ index 103ce21..d1b4693 100644
 +    request<import('./types').GatewayTestResponse>(`/gateway/test/${platform}`, {
 +      method: 'POST',
 +    }),
++
++  adminGatewayStart: () =>
++    request<import('./types').CommandActionResponse>('/admin/gateway/start', {
++      method: 'POST',
++    }),
++  adminGatewayStop: () =>
++    request<import('./types').CommandActionResponse>('/admin/gateway/stop', {
++      method: 'POST',
++    }),
++  adminGatewayRestart: () =>
++    request<import('./types').CommandActionResponse>('/admin/gateway/restart', {
++      method: 'POST',
++    }),
++  adminDoctor: (fix = false) =>
++    request<import('./types').CommandActionResponse>('/admin/doctor', {
++      method: 'POST',
++      body: JSON.stringify({ fix }),
++    }),
++  pairingState: () => request<import('./types').PairingStateResponse>('/admin/pairing'),
++  approvePairing: (platform: string, code: string) =>
++    request<import('./types').PairingMutationResponse>('/admin/pairing/approve', {
++      method: 'POST',
++      body: JSON.stringify({ platform, code }),
++    }),
++  revokePairing: (platform: string, user_id: string) =>
++    request<import('./types').PairingMutationResponse>('/admin/pairing/revoke', {
++      method: 'POST',
++      body: JSON.stringify({ platform, user_id }),
++    }),
++  clearPendingPairings: (platform?: string) =>
++    request<import('./types').PairingMutationResponse>('/admin/pairing/clear-pending', {
++      method: 'POST',
++      body: JSON.stringify({ platform: platform || null }),
++    }),
  
    // Config
    config: () => request<import('./types').ConfigResponse>('/config'),
+@@ -119,6 +172,27 @@ export const api = {
+     const params = category ? `?category=${encodeURIComponent(category)}` : ''
+     return request<import('./types').SkillDetail>(`/skills/detail/${source}/${dirName}${params}`)
+   },
++  createCustomSkill: (payload: {
++    name: string
++    dir_name?: string
++    category?: string
++    description?: string
++    content?: string
++  }) =>
++    request<import('./types').CustomSkillMutationResponse>('/skills/custom', {
++      method: 'POST',
++      body: JSON.stringify(payload),
++    }),
++  updateCustomSkill: (dirName: string, payload: { category?: string; content: string }) =>
++    request<import('./types').CustomSkillMutationResponse>(`/skills/custom/${encodeURIComponent(dirName)}`, {
++      method: 'PATCH',
++      body: JSON.stringify(payload),
++    }),
++  deleteCustomSkill: (dirName: string, category?: string) =>
++    request<import('./types').CustomSkillMutationResponse>(`/skills/custom/${encodeURIComponent(dirName)}`, {
++      method: 'DELETE',
++      body: JSON.stringify({ category: category || '' }),
++    }),
+   skillUsage: () =>
+     request<{ usage_7d: Record<string, number>; usage_all: Record<string, number> }>('/skills/usage'),
+ }
 diff --git a/frontend/src/api/types.ts b/frontend/src/api/types.ts
-index 5cc0111..e2e5b60 100644
+index 5cc0111..f8a1002 100644
 --- a/frontend/src/api/types.ts
 +++ b/frontend/src/api/types.ts
-@@ -72,6 +72,52 @@ export interface GatewayStatus {
+@@ -72,6 +72,85 @@ export interface GatewayStatus {
    }>
  }
  
@@ -194,9 +305,620 @@ index 5cc0111..e2e5b60 100644
 +  missing_fields: string[]
 +}
 +
++export interface CommandActionResponse {
++  success: boolean
++  action: string
++  exit_code: number
++  stdout: string
++  stderr: string
++}
++
++export interface PairingPendingEntry {
++  platform: string
++  code: string
++  user_id: string
++  user_name: string
++  age_minutes: number
++}
++
++export interface PairingApprovedEntry {
++  platform: string
++  user_id: string
++  user_name: string
++  approved_at: number
++}
++
++export interface PairingStateResponse {
++  pending: PairingPendingEntry[]
++  approved: PairingApprovedEntry[]
++}
++
++export interface PairingMutationResponse {
++  success: boolean
++  message: string
++}
++
  export interface ConfigResponse {
    config: Record<string, unknown>
  }
+@@ -110,6 +189,14 @@ export interface SkillDetail {
+   py_files: Record<string, string>
+ }
+ 
++export interface CustomSkillMutationResponse {
++  success: boolean
++  dir_name: string
++  category: string | null
++  path: string
++  message: string
++}
++
+ export interface WSEvent {
+   type: string
+   data: Record<string, unknown>
+diff --git a/frontend/src/components/admin/EmbeddedTtyView.tsx b/frontend/src/components/admin/EmbeddedTtyView.tsx
+new file mode 100644
+index 0000000..c3a8c4f
+--- /dev/null
++++ b/frontend/src/components/admin/EmbeddedTtyView.tsx
+@@ -0,0 +1,100 @@
++import { useMemo, useState } from 'react'
++import { Link, useSearchParams } from 'react-router-dom'
++
++export function EmbeddedTtyView({
++  title,
++  description,
++  routeBase,
++  accentLabel,
++  commands,
++}: {
++  title: string
++  description: string
++  routeBase: '/terminal' | '/neurovision'
++  accentLabel: string
++  commands: Array<{ label: string; command: string }>
++}) {
++  const [searchParams] = useSearchParams()
++  const standalone = searchParams.get('standalone') === '1'
++  const [frameKey, setFrameKey] = useState(0)
++
++  const iframeSrc = useMemo(() => `${routeBase}/`, [routeBase])
++  const standaloneHref = `${routeBase}?standalone=1`
++
++  return (
++    <div className={standalone ? 'min-h-screen flex flex-col bg-[var(--color-bg)]' : 'p-6 space-y-4 h-full flex flex-col'}>
++      <div className={standalone ? 'border-b px-6 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between' : 'flex flex-col gap-2 md:flex-row md:items-end md:justify-between'}>
++        <div>
++          <div className="text-[11px] uppercase tracking-[0.18em] mb-2" style={{ color: 'var(--color-primary)' }}>
++            {accentLabel}
++          </div>
++          <h2 className="text-2xl font-semibold">{title}</h2>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            {description}
++          </p>
++        </div>
++        <div className="flex flex-wrap gap-2">
++          <button
++            onClick={() => setFrameKey((value) => value + 1)}
++            className="rounded-lg px-4 py-2 text-sm font-medium"
++            style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
++          >
++            Reconnect
++          </button>
++          {standalone ? (
++            <Link
++              to={routeBase}
++              className="rounded-lg px-4 py-2 text-sm font-medium no-underline"
++              style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
++            >
++              Back to dashboard
++            </Link>
++          ) : (
++            <a
++              href={standaloneHref}
++              target="_blank"
++              rel="noreferrer"
++              className="rounded-lg px-4 py-2 text-sm font-medium no-underline"
++              style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
++            >
++              Open in new window
++            </a>
++          )}
++        </div>
++      </div>
++
++      <div
++        className={standalone ? 'px-6 py-4' : 'rounded-xl border p-4'}
++        style={{ borderColor: 'var(--color-border)', backgroundColor: standalone ? 'transparent' : 'var(--color-surface)' }}
++      >
++        <div className="text-sm mb-3" style={{ color: 'var(--color-text-muted)' }}>
++          {routeBase === '/terminal'
++            ? 'This is full shell access. If the session drops or shows a reconnect prompt, use the Reconnect button above.'
++            : 'Neurovision runs through the same browser terminal stack. If it drops, use Reconnect to relaunch the visual session.'}
++        </div>
++        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
++          {commands.map((item) => (
++            <div key={item.command} className="rounded-lg p-3" style={{ backgroundColor: 'var(--color-bg)' }}>
++              <div className="text-xs font-medium mb-1">{item.label}</div>
++              <div className="font-mono text-xs break-all" style={{ color: 'var(--color-primary)' }}>
++                {item.command}
++              </div>
++            </div>
++          ))}
++        </div>
++      </div>
++
++      <div
++        className={standalone ? 'flex-1 px-6 pb-6' : 'rounded-xl border overflow-hidden flex-1 min-h-[70vh]'}
++        style={{ borderColor: 'var(--color-border)', backgroundColor: '#05080d' }}
++      >
++        <iframe
++          key={frameKey}
++          title={title}
++          src={iframeSrc}
++          className="w-full h-full border-0 min-h-[70vh]"
++        />
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/OpenRouterSetup.tsx b/frontend/src/components/admin/OpenRouterSetup.tsx
+new file mode 100644
+index 0000000..3d4c13c
+--- /dev/null
++++ b/frontend/src/components/admin/OpenRouterSetup.tsx
+@@ -0,0 +1,154 @@
++import { useEffect, useMemo, useState } from 'react'
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
++import { api } from '../../api/client'
++
++const TARGET_MODEL = 'minimax/minimax-m2.7'
++
++function readModelConfig(raw: Record<string, unknown> | undefined): { provider: string; model: string } {
++  const model = raw?.model
++  if (typeof model === 'string') {
++    return { provider: '', model }
++  }
++  if (model && typeof model === 'object') {
++    const value = model as Record<string, unknown>
++    return {
++      provider: String(value.provider || ''),
++      model: String(value.default || value.model || ''),
++    }
++  }
++  return { provider: '', model: '' }
++}
++
++export function OpenRouterSetup({ gatewayRunning }: { gatewayRunning: boolean }) {
++  const queryClient = useQueryClient()
++  const { data: configData } = useQuery({
++    queryKey: ['config'],
++    queryFn: api.config,
++  })
++  const { data: envData } = useQuery({
++    queryKey: ['env-variables'],
++    queryFn: api.envVariables,
++  })
++
++  const [apiKey, setApiKey] = useState('')
++  const [notice, setNotice] = useState('')
++
++  const keyEntry = envData?.variables.find((entry) => entry.key === 'OPENROUTER_API_KEY')
++  const openRouterConfigured = Boolean(keyEntry && keyEntry.value && keyEntry.value !== '(empty)')
++  const current = useMemo(() => readModelConfig(configData?.config), [configData?.config])
++  const modelReady = current.provider === 'openrouter' && current.model === TARGET_MODEL
++
++  useEffect(() => {
++    setNotice('')
++  }, [apiKey])
++
++  const applySetup = useMutation({
++    mutationFn: async () => {
++      if (!openRouterConfigured && !apiKey.trim()) {
++        throw new Error('Enter an OpenRouter API key first.')
++      }
++      if (apiKey.trim()) {
++        await api.patchEnv('OPENROUTER_API_KEY', apiKey.trim())
++      }
++      await api.patchConfig('model.provider', 'openrouter')
++      await api.patchConfig('model.default', TARGET_MODEL)
++      return gatewayRunning ? api.adminGatewayRestart() : api.adminGatewayStart()
++    },
++    onSuccess: () => {
++      setNotice('Saved OpenRouter config, set MiniMax M2.7, and refreshed the gateway.')
++      setApiKey('')
++      queryClient.invalidateQueries({ queryKey: ['config'] })
++      queryClient.invalidateQueries({ queryKey: ['env-variables'] })
++      queryClient.invalidateQueries({ queryKey: ['gateway-status'] })
++      queryClient.invalidateQueries({ queryKey: ['gateway-config'] })
++    },
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Failed to save model settings')
++    },
++  })
++
++  return (
++    <div
++      className="rounded-xl border p-5 space-y-4"
++      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++    >
++      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
++        <div>
++          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
++            AI Provider Setup
++          </h3>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Save your OpenRouter key, switch the runtime to OpenRouter, and pin the default model to MiniMax M2.7.
++          </p>
++        </div>
++        <div className="flex gap-2 flex-wrap">
++          <Status label="API key" ready={openRouterConfigured} />
++          <Status label="Model" ready={modelReady} />
++        </div>
++      </div>
++
++      <div className="grid gap-4 md:grid-cols-[2fr,1fr,1fr]">
++        <label className="flex flex-col gap-1.5">
++          <span className="text-sm font-medium">OpenRouter API key</span>
++          <input
++            type="password"
++            value={apiKey}
++            onChange={(e) => setApiKey(e.target.value)}
++            placeholder={openRouterConfigured ? 'Configured - leave blank to keep current key' : 'sk-or-v1-...'}
++            className="w-full rounded-lg border px-3 py-2 text-sm"
++            style={{
++              borderColor: 'var(--color-border)',
++              backgroundColor: 'var(--color-bg)',
++              color: 'var(--color-text)',
++            }}
++          />
++          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
++            Stored in `~/.hermes/.env` as `OPENROUTER_API_KEY`.
++          </span>
++        </label>
++
++        <InfoTile label="Provider" value={current.provider || 'unset'} />
++        <InfoTile label="Default model" value={current.model || 'unset'} />
++      </div>
++
++      <div className="flex flex-wrap items-center gap-3">
++        <button
++          onClick={() => applySetup.mutate()}
++          disabled={applySetup.isPending}
++          className="rounded-lg px-4 py-2 text-sm font-medium"
++          style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
++        >
++          {applySetup.isPending ? 'Applying...' : 'Use OpenRouter MiniMax M2.7'}
++        </button>
++        <span className="text-sm" style={{ color: notice ? 'var(--color-info)' : 'var(--color-text-muted)' }}>
++          {notice || 'This also starts or restarts the gateway.'}
++        </span>
++      </div>
++    </div>
++  )
++}
++
++function Status({ label, ready }: { label: string; ready: boolean }) {
++  return (
++    <span
++      className="rounded-full px-3 py-1 text-xs font-medium"
++      style={{
++        backgroundColor: ready ? 'rgba(43,253,28,0.12)' : 'rgba(255,107,143,0.12)',
++        color: ready ? 'var(--color-success)' : 'var(--color-error)',
++      }}
++    >
++      {label}: {ready ? 'ready' : 'needs setup'}
++    </span>
++  )
++}
++
++function InfoTile({ label, value }: { label: string; value: string }) {
++  return (
++    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--color-bg)' }}>
++      <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
++        {label}
++      </div>
++      <div className="font-mono text-sm break-all">{value}</div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/PairingManager.tsx b/frontend/src/components/admin/PairingManager.tsx
+new file mode 100644
+index 0000000..085edec
+--- /dev/null
++++ b/frontend/src/components/admin/PairingManager.tsx
+@@ -0,0 +1,153 @@
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
++import { useState } from 'react'
++import { api } from '../../api/client'
++
++export function PairingManager() {
++  const queryClient = useQueryClient()
++  const { data, isLoading } = useQuery({
++    queryKey: ['pairing-state'],
++    queryFn: api.pairingState,
++    refetchInterval: 10000,
++  })
++  const [notice, setNotice] = useState('')
++
++  const mutatePairing = useMutation({
++    mutationFn: async (
++      action:
++        | { kind: 'approve'; platform: string; code: string }
++        | { kind: 'revoke'; platform: string; userId: string }
++        | { kind: 'clear'; platform?: string },
++    ) => {
++      if (action.kind === 'approve') return api.approvePairing(action.platform, action.code)
++      if (action.kind === 'revoke') return api.revokePairing(action.platform, action.userId)
++      return api.clearPendingPairings(action.platform)
++    },
++    onSuccess: (result) => {
++      setNotice(result.message)
++      queryClient.invalidateQueries({ queryKey: ['pairing-state'] })
++      queryClient.invalidateQueries({ queryKey: ['gateway-status'] })
++    },
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Pairing action failed')
++    },
++  })
++
++  return (
++    <div
++      className="rounded-xl border p-5 space-y-4"
++      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++    >
++      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
++        <div>
++          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
++            Pairing Requests
++          </h3>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Approve or revoke messaging access without dropping into the CLI.
++          </p>
++        </div>
++        <div className="flex gap-2">
++          <Badge label="Pending" value={String(data?.pending.length || 0)} />
++          <Badge label="Approved" value={String(data?.approved.length || 0)} />
++        </div>
++      </div>
++
++      <div className="flex flex-wrap gap-3">
++        <button
++          onClick={() => mutatePairing.mutate({ kind: 'clear' })}
++          disabled={mutatePairing.isPending}
++          className="rounded-lg px-4 py-2 text-sm font-medium"
++          style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
++        >
++          Clear pending
++        </button>
++        <span className="text-sm" style={{ color: notice ? 'var(--color-info)' : 'var(--color-text-muted)' }}>
++          {notice || 'Pending requests come from DM pairing flows on the gateway.'}
++        </span>
++      </div>
++
++      {isLoading ? (
++        <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading pairing data...</div>
++      ) : (
++        <div className="grid gap-4 xl:grid-cols-2">
++          <section className="rounded-lg border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
++            <div className="flex items-center justify-between mb-3">
++              <h4 className="text-sm font-medium">Pending approvals</h4>
++              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
++                {data?.pending.length || 0} request(s)
++              </span>
++            </div>
++            <div className="space-y-3">
++              {data?.pending.length ? data.pending.map((item) => (
++                <div key={`${item.platform}-${item.code}`} className="rounded-lg border p-3" style={{ borderColor: 'var(--color-border)' }}>
++                  <div className="flex items-center justify-between gap-3">
++                    <div>
++                      <div className="font-medium text-sm">{item.user_name || item.user_id}</div>
++                      <div className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
++                        {item.platform} · {item.code} · {item.age_minutes}m old
++                      </div>
++                    </div>
++                    <button
++                      onClick={() => mutatePairing.mutate({ kind: 'approve', platform: item.platform, code: item.code })}
++                      disabled={mutatePairing.isPending}
++                      className="rounded-lg px-3 py-1.5 text-sm font-medium"
++                      style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
++                    >
++                      Approve
++                    </button>
++                  </div>
++                </div>
++              )) : (
++                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No pending pairing requests.</p>
++              )}
++            </div>
++          </section>
++
++          <section className="rounded-lg border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
++            <div className="flex items-center justify-between mb-3">
++              <h4 className="text-sm font-medium">Approved users</h4>
++              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
++                {data?.approved.length || 0} user(s)
++              </span>
++            </div>
++            <div className="space-y-3">
++              {data?.approved.length ? data.approved.map((item) => (
++                <div key={`${item.platform}-${item.user_id}`} className="rounded-lg border p-3" style={{ borderColor: 'var(--color-border)' }}>
++                  <div className="flex items-center justify-between gap-3">
++                    <div>
++                      <div className="font-medium text-sm">{item.user_name || item.user_id}</div>
++                      <div className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
++                        {item.platform} · {item.user_id}
++                      </div>
++                    </div>
++                    <button
++                      onClick={() => mutatePairing.mutate({ kind: 'revoke', platform: item.platform, userId: item.user_id })}
++                      disabled={mutatePairing.isPending}
++                      className="rounded-lg px-3 py-1.5 text-sm font-medium"
++                      style={{ backgroundColor: 'rgba(255,107,143,0.12)', color: 'var(--color-error)' }}
++                    >
++                      Revoke
++                    </button>
++                  </div>
++                </div>
++              )) : (
++                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No approved pairing entries yet.</p>
++              )}
++            </div>
++          </section>
++        </div>
++      )}
++    </div>
++  )
++}
++
++function Badge({ label, value }: { label: string; value: string }) {
++  return (
++    <div className="rounded-lg px-3 py-2 text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
++      <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
++        {label}
++      </div>
++      <div>{value}</div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/admin/RuntimeControls.tsx b/frontend/src/components/admin/RuntimeControls.tsx
+new file mode 100644
+index 0000000..a8cec16
+--- /dev/null
++++ b/frontend/src/components/admin/RuntimeControls.tsx
+@@ -0,0 +1,132 @@
++import { useMutation, useQueryClient } from '@tanstack/react-query'
++import { useState } from 'react'
++import { api } from '../../api/client'
++import type { CommandActionResponse } from '../../api/types'
++
++function outputFor(result: CommandActionResponse | null): string {
++  if (!result) return ''
++  return [result.stdout?.trim(), result.stderr?.trim()].filter(Boolean).join('\n\n')
++}
++
++export function RuntimeControls({ gatewayRunning }: { gatewayRunning: boolean }) {
++  const queryClient = useQueryClient()
++  const [result, setResult] = useState<CommandActionResponse | null>(null)
++
++  const runAction = useMutation({
++    mutationFn: async (action: 'gatewayStart' | 'gatewayStop' | 'gatewayRestart' | 'doctor' | 'doctorFix') => {
++      if (action === 'gatewayStart') return api.adminGatewayStart()
++      if (action === 'gatewayStop') return api.adminGatewayStop()
++      if (action === 'gatewayRestart') return api.adminGatewayRestart()
++      if (action === 'doctorFix') return api.adminDoctor(true)
++      return api.adminDoctor(false)
++    },
++    onSuccess: (response) => {
++      setResult(response)
++      queryClient.invalidateQueries({ queryKey: ['gateway-status'] })
++      queryClient.invalidateQueries({ queryKey: ['gateway-config'] })
++    },
++    onError: (error) => {
++      setResult({
++        success: false,
++        action: 'error',
++        exit_code: 1,
++        stdout: '',
++        stderr: error instanceof Error ? error.message : 'Unknown action failure',
++      })
++    },
++  })
++
++  const busy = runAction.isPending
++  const output = outputFor(result)
++
++  return (
++    <div
++      className="rounded-xl border p-5 space-y-4"
++      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++    >
++      <div className="flex items-center justify-between gap-4">
++        <div>
++          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
++            Runtime Controls
++          </h3>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Start, stop, restart, or repair the runtime without leaving the dashboard.
++          </p>
++        </div>
++        <span
++          className="rounded-full px-3 py-1 text-xs font-medium"
++          style={{
++            backgroundColor: gatewayRunning ? 'rgba(43,253,28,0.12)' : 'rgba(255,107,143,0.12)',
++            color: gatewayRunning ? 'var(--color-success)' : 'var(--color-error)',
++          }}
++        >
++          Gateway {gatewayRunning ? 'running' : 'stopped'}
++        </span>
++      </div>
++
++      <div className="flex flex-wrap gap-3">
++        <ActionButton label="Start" onClick={() => runAction.mutate('gatewayStart')} disabled={busy} />
++        <ActionButton label="Stop" onClick={() => runAction.mutate('gatewayStop')} disabled={busy} />
++        <ActionButton label="Restart" onClick={() => runAction.mutate('gatewayRestart')} disabled={busy} />
++        <ActionButton label="Doctor" onClick={() => runAction.mutate('doctor')} disabled={busy} />
++        <ActionButton label="Doctor Fix" onClick={() => runAction.mutate('doctorFix')} disabled={busy} emphasis disabledStyle={busy} />
++      </div>
++
++      {result && (
++        <div className="space-y-3">
++          <div className="flex items-center gap-3 text-sm">
++            <span
++              className="font-medium"
++              style={{ color: result.success ? 'var(--color-success)' : 'var(--color-error)' }}
++            >
++              {result.success ? 'Success' : 'Failed'}
++            </span>
++            <span style={{ color: 'var(--color-text-muted)' }}>{result.action}</span>
++            <span className="font-mono text-xs" style={{ color: 'var(--color-text-muted)' }}>
++              exit {result.exit_code}
++            </span>
++          </div>
++
++          {output && (
++            <pre
++              className="rounded-lg p-3 text-xs whitespace-pre-wrap overflow-auto max-h-72"
++              style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
++            >
++              {output}
++            </pre>
++          )}
++        </div>
++      )}
++    </div>
++  )
++}
++
++function ActionButton({
++  label,
++  onClick,
++  disabled,
++  emphasis,
++  disabledStyle,
++}: {
++  label: string
++  onClick: () => void
++  disabled?: boolean
++  emphasis?: boolean
++  disabledStyle?: boolean
++}) {
++  return (
++    <button
++      onClick={onClick}
++      disabled={disabled}
++      className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity"
++      style={{
++        backgroundColor: emphasis ? 'var(--color-primary)' : 'var(--color-bg)',
++        color: emphasis ? '#041205' : 'var(--color-text)',
++        border: emphasis ? 'none' : '1px solid var(--color-border)',
++        opacity: disabledStyle ? 0.7 : 1,
++      }}
++    >
++      {label}
++    </button>
++  )
++}
 diff --git a/frontend/src/components/layout/Header.tsx b/frontend/src/components/layout/Header.tsx
 index 4496915..87cfa41 100644
 --- a/frontend/src/components/layout/Header.tsx
@@ -385,10 +1107,19 @@ index d34ddcc..3584e67 100644
  
  body {
 diff --git a/frontend/src/pages/Dashboard.tsx b/frontend/src/pages/Dashboard.tsx
-index 6070c85..1336a46 100644
+index 6070c85..765973f 100644
 --- a/frontend/src/pages/Dashboard.tsx
 +++ b/frontend/src/pages/Dashboard.tsx
-@@ -21,6 +21,18 @@ export function Dashboard() {
+@@ -1,6 +1,8 @@
+ import { useQuery } from '@tanstack/react-query'
+ import { Link } from 'react-router-dom'
+ import { api } from '../api/client'
++import { OpenRouterSetup } from '../components/admin/OpenRouterSetup'
++import { RuntimeControls } from '../components/admin/RuntimeControls'
+ import { sourceColor } from '../utils/sourceColors'
+ 
+ export function Dashboard() {
+@@ -21,6 +23,18 @@ export function Dashboard() {
      queryFn: () => api.sessions({ limit: 30 }),
      refetchInterval: 5000,
    })
@@ -407,7 +1138,7 @@ index 6070c85..1336a46 100644
  
    // Sort: active sessions first, then by last_active/started_at desc
    const sortedSessions = [...(sessionsData?.sessions || [])].sort((a, b) => {
-@@ -39,12 +51,19 @@ export function Dashboard() {
+@@ -39,12 +53,19 @@ export function Dashboard() {
    const services = gateway?.platforms?.filter(
      (p) => p.details && (p.details as Record<string, unknown>).type === 'service'
    ) || []
@@ -430,11 +1161,16 @@ index 6070c85..1336a46 100644
        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-shrink-0">
          <StatCard label="Total Sessions" value={stats?.total_sessions ?? '...'} />
          <StatCard label="Total Messages" value={stats?.total_messages ?? '...'} />
-@@ -59,9 +78,64 @@ export function Dashboard() {
+@@ -59,9 +80,69 @@ export function Dashboard() {
          />
        </div>
  
 -      {/* Platforms & Services */}
++      <div className="grid gap-4 xl:grid-cols-2">
++        <OpenRouterSetup gatewayRunning={Boolean(gateway?.running)} />
++        <RuntimeControls gatewayRunning={Boolean(gateway?.running)} />
++      </div>
++
 +      <div className="grid gap-4 lg:grid-cols-3">
 +        <HubCard
 +          to="/terminal"
@@ -497,7 +1233,7 @@ index 6070c85..1336a46 100644
          <div className="flex flex-wrap gap-2">
            {gatewayPlatforms.map((p) => (
              <ServiceBadge key={p.name} name={p.name} active={p.connected} />
-@@ -77,9 +151,7 @@ export function Dashboard() {
+@@ -77,9 +158,7 @@ export function Dashboard() {
          </div>
        </div>
  
@@ -507,7 +1243,7 @@ index 6070c85..1336a46 100644
          <div className="lg:col-span-2 rounded-lg border p-4 flex flex-col md:min-h-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
            <div className="flex items-center justify-between mb-3">
              <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>Activity Feed</h3>
-@@ -127,7 +199,6 @@ export function Dashboard() {
+@@ -127,7 +206,6 @@ export function Dashboard() {
            </div>
          </div>
  
@@ -515,7 +1251,7 @@ index 6070c85..1336a46 100644
          <div className="rounded-lg border p-4 flex flex-col md:min-h-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
            <h3 className="text-sm font-medium mb-3 flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>Sessions by Model</h3>
            <div className="space-y-2 max-h-64 md:max-h-none md:flex-1 overflow-y-auto md:min-h-0">
-@@ -148,6 +219,51 @@ export function Dashboard() {
+@@ -148,6 +226,51 @@ export function Dashboard() {
    )
  }
  
@@ -569,13 +1305,14 @@ index 6070c85..1336a46 100644
      <div className="rounded-lg border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
 diff --git a/frontend/src/pages/Gateway.tsx b/frontend/src/pages/Gateway.tsx
 new file mode 100644
-index 0000000..b0a5995
+index 0000000..9cbec35
 --- /dev/null
 +++ b/frontend/src/pages/Gateway.tsx
-@@ -0,0 +1,475 @@
+@@ -0,0 +1,450 @@
 +import { useEffect, useMemo, useState, type ReactNode } from 'react'
 +import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 +import { api } from '../api/client'
++import { PairingManager } from '../components/admin/PairingManager'
 +import type { GatewayField, GatewayPlatformConfig } from '../api/types'
 +
 +type Drafts = Record<string, Record<string, string>>
@@ -799,20 +1536,7 @@ index 0000000..b0a5995
 +        ))}
 +      </div>
 +
-+      <div
-+        className="rounded-xl border p-5"
-+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
-+      >
-+        <h3 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--color-primary)' }}>
-+          Pairing Commands
-+        </h3>
-+        <div className="grid gap-2 md:grid-cols-2">
-+          <CommandHint command="fr33d0m pairing list" description="See pending and approved pairing requests." />
-+          <CommandHint command="fr33d0m pairing approve telegram CODE" description="Approve a pairing code from Telegram, Signal, Email, or Discord." />
-+          <CommandHint command="fr33d0m gateway restart" description="Restart the gateway after saving credentials." />
-+          <CommandHint command="fr33d0m whatsapp" description="Launch the WhatsApp pairing flow and scan the QR code." />
-+        </div>
-+      </div>
++      <PairingManager />
 +    </div>
 +  )
 +}
@@ -1028,19 +1752,6 @@ index 0000000..b0a5995
 +  )
 +}
 +
-+function CommandHint({ command, description }: { command: string; description: string }) {
-+  return (
-+    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--color-bg)' }}>
-+      <div className="font-mono text-xs mb-1" style={{ color: 'var(--color-primary)' }}>
-+        {command}
-+      </div>
-+      <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-+        {description}
-+      </div>
-+    </div>
-+  )
-+}
-+
 +function NoticeText({ notice }: { notice: Notice }) {
 +  return (
 +    <span className="text-sm" style={{ color: toneColor(notice.tone) }}>
@@ -1050,82 +1761,451 @@ index 0000000..b0a5995
 +}
 diff --git a/frontend/src/pages/Neurovision.tsx b/frontend/src/pages/Neurovision.tsx
 new file mode 100644
-index 0000000..b7a0871
+index 0000000..57066e5
 --- /dev/null
 +++ b/frontend/src/pages/Neurovision.tsx
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,18 @@
++import { EmbeddedTtyView } from '../components/admin/EmbeddedTtyView'
++
 +export function Neurovision() {
 +  return (
-+    <div className="p-6 space-y-4 h-full flex flex-col">
-+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
++    <EmbeddedTtyView
++      title="Neurovision"
++      description="Watch the Fr33d0m visualizer in-browser. Use Reconnect if the visual session drops or you want a fresh launch."
++      routeBase="/neurovision"
++      accentLabel="Visualize"
++      commands={[
++        { label: 'Gallery mode', command: 'fr33d0m-neurovision --gallery' },
++        { label: 'Live mode', command: 'fr33d0m-neurovision' },
++        { label: 'List themes', command: 'fr33d0m-neurovision --list-themes' },
++        { label: 'Restart visual service', command: 'systemctl --user restart fr33d0m-neurovision-web' },
++      ]}
++    />
++  )
++}
+diff --git a/frontend/src/pages/Skills.tsx b/frontend/src/pages/Skills.tsx
+index 89acabb..eb93779 100644
+--- a/frontend/src/pages/Skills.tsx
++++ b/frontend/src/pages/Skills.tsx
+@@ -1,10 +1,13 @@
+-import { useQuery } from '@tanstack/react-query'
+-import { useState } from 'react'
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
++import { useEffect, useMemo, useState } from 'react'
+ import { api } from '../api/client'
+ import type { SkillInfo } from '../api/types'
+ 
+ export function Skills() {
++  const queryClient = useQueryClient()
+   const [inspecting, setInspecting] = useState<{ source: string; dirName: string; category?: string | null } | null>(null)
++  const [creating, setCreating] = useState(false)
++  const [notice, setNotice] = useState('')
+ 
+   const { data: builtinData } = useQuery({
+     queryKey: ['builtin-skills'],
+@@ -21,6 +24,18 @@ export function Skills() {
+     queryFn: api.skillUsage,
+   })
+ 
++  const deleteMutation = useMutation({
++    mutationFn: ({ dirName, category }: { dirName: string; category?: string | null }) =>
++      api.deleteCustomSkill(dirName, category || undefined),
++    onSuccess: (result) => {
++      setNotice(result.message)
++      queryClient.invalidateQueries({ queryKey: ['custom-skills'] })
++    },
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Failed to delete custom skill')
++    },
++  })
++
+   if (inspecting) {
+     return (
+       <SkillInspector
+@@ -28,32 +43,78 @@ export function Skills() {
+         dirName={inspecting.dirName}
+         category={inspecting.category}
+         onBack={() => setInspecting(null)}
++        onDeleted={() => {
++          setInspecting(null)
++          queryClient.invalidateQueries({ queryKey: ['custom-skills'] })
++        }}
+       />
+     )
+   }
+ 
+   return (
+     <div className="p-6 space-y-6">
+-      <h2 className="text-xl font-semibold">Skills</h2>
++      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
 +        <div>
-+          <h2 className="text-2xl font-semibold">Neurovision</h2>
++          <h2 className="text-xl font-semibold">Skills</h2>
 +          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-+            Browser view of the terminal visualizer. It runs through a web terminal so you can watch the live curses interface without SSH.
++            Built-in skills stay read-only. Custom skills can be created, edited, and deleted here.
 +          </p>
 +        </div>
-+        <a
-+          href="/neurovision/"
-+          target="_blank"
-+          rel="noreferrer"
-+          className="text-sm no-underline"
-+          style={{ color: 'var(--color-primary)' }}
++        <button
++          onClick={() => setCreating((value) => !value)}
++          className="rounded-lg px-4 py-2 text-sm font-medium"
++          style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
 +        >
-+          Open in new tab
-+        </a>
++          {creating ? 'Close editor' : '+ New Custom Skill'}
++        </button>
 +      </div>
 +
-+      <div
-+        className="rounded-xl border overflow-hidden flex-1 min-h-[70vh]"
-+        style={{ borderColor: 'var(--color-border)', backgroundColor: '#020406' }}
-+      >
-+        <iframe
-+          title="Fr33d0m Neurovision"
-+          src="/neurovision/"
-+          className="w-full h-full border-0"
++      {notice && (
++        <div className="rounded-lg p-3 text-sm" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-info)' }}>
++          {notice}
++        </div>
++      )}
++
++      {creating && (
++        <SkillCreateForm
++          onCreated={(skill) => {
++            setCreating(false)
++            setNotice(skill.message)
++            queryClient.invalidateQueries({ queryKey: ['custom-skills'] })
++            setInspecting({ source: 'custom', dirName: skill.dir_name, category: skill.category })
++          }}
 +        />
++      )}
+ 
+       {/* Custom Skills */}
+-      {customData && customData.skills.length > 0 && (
++      {customData && (
+         <section>
+           <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--color-text-muted)' }}>
+             Custom Skills ({customData.skills.length})
+           </h3>
+-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+-            {customData.skills.map((skill) => (
+-              <SkillCard
+-                key={skill.dir_name}
+-                skill={skill}
+-                source="custom"
+-                usage7d={usageData?.usage_7d[skill.dir_name] || usageData?.usage_7d[skill.name] || 0}
+-                usageAll={usageData?.usage_all[skill.dir_name] || usageData?.usage_all[skill.name] || 0}
+-                onInspect={() => setInspecting({ source: 'custom', dirName: skill.dir_name, category: skill.category })}
+-              />
+-            ))}
+-          </div>
++          {customData.skills.length === 0 ? (
++            <div className="rounded-lg border p-4 text-sm" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
++              No custom skills yet. Use the “New Custom Skill” button to create one.
++            </div>
++          ) : (
++            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
++              {customData.skills.map((skill) => (
++                <SkillCard
++                  key={skill.dir_name}
++                  skill={skill}
++                  source="custom"
++                  usage7d={usageData?.usage_7d[skill.dir_name] || usageData?.usage_7d[skill.name] || 0}
++                  usageAll={usageData?.usage_all[skill.dir_name] || usageData?.usage_all[skill.name] || 0}
++                  onInspect={() => setInspecting({ source: 'custom', dirName: skill.dir_name, category: skill.category })}
++                  onDelete={() => {
++                    if (confirm(`Delete custom skill "${skill.name}"?`)) {
++                      deleteMutation.mutate({ dirName: skill.dir_name, category: skill.category })
++                    }
++                  }}
++                />
++              ))}
++            </div>
++          )}
+         </section>
+       )}
+ 
+@@ -87,12 +148,14 @@ function SkillCard({
+   usage7d,
+   usageAll,
+   onInspect,
++  onDelete,
+ }: {
+   skill: SkillInfo
+   source: string
+   usage7d: number
+   usageAll: number
+   onInspect: () => void
++  onDelete?: () => void
+ }) {
+   return (
+     <div
+@@ -152,6 +215,20 @@ function SkillCard({
+           )}
+         </div>
+       )}
++      {source === 'custom' && onDelete && (
++        <div className="mt-3 flex justify-end">
++          <button
++            onClick={(e) => {
++              e.stopPropagation()
++              onDelete()
++            }}
++            className="rounded px-2.5 py-1 text-xs font-medium"
++            style={{ backgroundColor: 'rgba(255,107,143,0.12)', color: 'var(--color-error)' }}
++          >
++            Delete
++          </button>
++        </div>
++      )}
+     </div>
+   )
+ }
+@@ -161,18 +238,53 @@ function SkillInspector({
+   dirName,
+   category,
+   onBack,
++  onDeleted,
+ }: {
+   source: string
+   dirName: string
+   category?: string | null
+   onBack: () => void
++  onDeleted: () => void
+ }) {
++  const queryClient = useQueryClient()
+   const { data, isLoading } = useQuery({
+     queryKey: ['skill-detail', source, dirName, category],
+     queryFn: () => api.skillDetail(source, dirName, category),
+   })
+ 
+   const [activeTab, setActiveTab] = useState<'docs' | 'code'>('docs')
++  const editableDocName = useMemo(
++    () => (data?.docs['SKILL.md'] ? 'SKILL.md' : Object.keys(data?.docs || {})[0] || ''),
++    [data?.docs],
++  )
++  const [editing, setEditing] = useState(false)
++  const [draftContent, setDraftContent] = useState('')
++  const [notice, setNotice] = useState('')
++
++  const updateMutation = useMutation({
++    mutationFn: () => api.updateCustomSkill(dirName, { category: category || '', content: draftContent }),
++    onSuccess: (result) => {
++      setNotice(result.message)
++      setEditing(false)
++      queryClient.invalidateQueries({ queryKey: ['custom-skills'] })
++      queryClient.invalidateQueries({ queryKey: ['skill-detail', source, dirName, category] })
++    },
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Failed to update custom skill')
++    },
++  })
++
++  const deleteMutation = useMutation({
++    mutationFn: () => api.deleteCustomSkill(dirName, category || undefined),
++    onSuccess: (result) => {
++      setNotice(result.message)
++      queryClient.invalidateQueries({ queryKey: ['custom-skills'] })
++      onDeleted()
++    },
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Failed to delete custom skill')
++    },
++  })
+ 
+   if (isLoading) return <div className="p-6">Loading skill...</div>
+   if (!data) return <div className="p-6">Skill not found</div>
+@@ -180,6 +292,12 @@ function SkillInspector({
+   const docEntries = Object.entries(data.docs)
+   const codeEntries = Object.entries(data.py_files)
+ 
++  useEffect(() => {
++    if (editing && editableDocName) {
++      setDraftContent(data.docs[editableDocName] || '')
++    }
++  }, [editing, editableDocName, data.docs])
++
+   return (
+     <div className="p-6 space-y-4">
+       {/* Header */}
+@@ -202,14 +320,66 @@ function SkillInspector({
+           >
+             {source}
+           </span>
++          {source === 'custom' && (
++            <>
++              <button
++                onClick={() => {
++                  setDraftContent(data.docs[editableDocName] || '')
++                  setEditing((value) => !value)
++                }}
++                className="rounded px-2.5 py-1 text-xs font-medium"
++                style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
++              >
++                {editing ? 'Close editor' : 'Edit SKILL.md'}
++              </button>
++              <button
++                onClick={() => {
++                  if (confirm(`Delete custom skill "${data.name}"?`)) {
++                    deleteMutation.mutate()
++                  }
++                }}
++                className="rounded px-2.5 py-1 text-xs font-medium"
++                style={{ backgroundColor: 'rgba(255,107,143,0.12)', color: 'var(--color-error)' }}
++              >
++                Delete
++              </button>
++            </>
++          )}
+         </div>
+         {data.description && (
+           <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+             {data.description}
+           </p>
+         )}
++        {notice && (
++          <div className="text-sm mt-2" style={{ color: 'var(--color-info)' }}>
++            {notice}
++          </div>
++        )}
+       </div>
+ 
++      {source === 'custom' && editing && editableDocName && (
++        <div className="rounded-lg border p-4 space-y-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
++          <div className="text-sm font-medium">Edit {editableDocName}</div>
++          <textarea
++            value={draftContent}
++            onChange={(e) => setDraftContent(e.target.value)}
++            className="w-full min-h-[320px] rounded-lg border p-3 text-xs font-mono"
++            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
++          />
++          <div className="flex justify-end">
++            <button
++              onClick={() => updateMutation.mutate()}
++              disabled={updateMutation.isPending}
++              className="rounded-lg px-4 py-2 text-sm font-medium"
++              style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
++            >
++              {updateMutation.isPending ? 'Saving...' : 'Save custom skill'}
++            </button>
++          </div>
++        </div>
++      )}
++
+       {/* Tab switch */}
+       <div className="flex gap-1">
+         <button
+@@ -260,6 +430,98 @@ function SkillInspector({
+   )
+ }
+ 
++function SkillCreateForm({ onCreated }: { onCreated: (result: { dir_name: string; category: string | null; message: string }) => void }) {
++  const [form, setForm] = useState({
++    name: '',
++    dirName: '',
++    category: '',
++    description: '',
++    content: '',
++  })
++  const [notice, setNotice] = useState('')
++
++  const createMutation = useMutation({
++    mutationFn: () =>
++      api.createCustomSkill({
++        name: form.name,
++        dir_name: form.dirName,
++        category: form.category,
++        description: form.description,
++        content: form.content,
++      }),
++    onSuccess: (result) => onCreated(result),
++    onError: (error) => {
++      setNotice(error instanceof Error ? error.message : 'Failed to create custom skill')
++    },
++  })
++
++  return (
++    <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
++      <div>
++        <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
++          New Custom Skill
++        </h3>
++        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++          Create a new custom skill under `~/.hermes/skills`. Leave content blank to use the default template.
++        </p>
++      </div>
++
++      <div className="grid gap-4 md:grid-cols-2">
++        <Field label="Skill name">
++          <input value={form.name} onChange={(e) => setForm((v) => ({ ...v, name: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" style={fieldStyles} />
++        </Field>
++        <Field label="Directory name (optional)">
++          <input value={form.dirName} onChange={(e) => setForm((v) => ({ ...v, dirName: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" style={fieldStyles} />
++        </Field>
++        <Field label="Category (optional)">
++          <input value={form.category} onChange={(e) => setForm((v) => ({ ...v, category: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" style={fieldStyles} />
++        </Field>
++        <Field label="Description">
++          <input value={form.description} onChange={(e) => setForm((v) => ({ ...v, description: e.target.value }))} className="w-full rounded-lg border px-3 py-2 text-sm" style={fieldStyles} />
++        </Field>
++      </div>
++
++      <Field label="SKILL.md content (optional)">
++        <textarea
++          value={form.content}
++          onChange={(e) => setForm((v) => ({ ...v, content: e.target.value }))}
++          className="w-full min-h-[220px] rounded-lg border p-3 text-xs font-mono"
++          style={fieldStyles}
++        />
++      </Field>
++
++      <div className="flex items-center justify-between gap-4">
++        <span className="text-sm" style={{ color: notice ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
++          {notice || 'Tip: use category names like "automation" or "research" to keep custom skills organized.'}
++        </span>
++        <button
++          onClick={() => createMutation.mutate()}
++          disabled={createMutation.isPending || !form.name.trim()}
++          className="rounded-lg px-4 py-2 text-sm font-medium"
++          style={{ backgroundColor: 'var(--color-primary)', color: '#041205' }}
++        >
++          {createMutation.isPending ? 'Creating...' : 'Create skill'}
++        </button>
 +      </div>
 +    </div>
 +  )
 +}
++
++function Field({ label, children }: { label: string; children: React.ReactNode }) {
++  return (
++    <label className="flex flex-col gap-1.5">
++      <span className="text-sm font-medium">{label}</span>
++      {children}
++    </label>
++  )
++}
++
++const fieldStyles = {
++  borderColor: 'var(--color-border)',
++  backgroundColor: 'var(--color-bg)',
++  color: 'var(--color-text)',
++} as const
++
+ function FileViewer({
+   name,
+   content,
 diff --git a/frontend/src/pages/Terminal.tsx b/frontend/src/pages/Terminal.tsx
 new file mode 100644
-index 0000000..f1a5c79
+index 0000000..3be541b
 --- /dev/null
 +++ b/frontend/src/pages/Terminal.tsx
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,18 @@
++import { EmbeddedTtyView } from '../components/admin/EmbeddedTtyView'
++
 +export function Terminal() {
 +  return (
-+    <div className="p-6 space-y-4 h-full flex flex-col">
-+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-+        <div>
-+          <h2 className="text-2xl font-semibold">Fr33d0m Terminal</h2>
-+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-+            Live browser terminal for the Fr33d0m CLI. Use this for chat, gateway restarts, pairing, and setup commands.
-+          </p>
-+        </div>
-+        <a
-+          href="/terminal/"
-+          target="_blank"
-+          rel="noreferrer"
-+          className="text-sm no-underline"
-+          style={{ color: 'var(--color-primary)' }}
-+        >
-+          Open in new tab
-+        </a>
-+      </div>
-+
-+      <div
-+        className="rounded-xl border overflow-hidden flex-1 min-h-[70vh]"
-+        style={{ borderColor: 'var(--color-border)', backgroundColor: '#05080d' }}
-+      >
-+        <iframe
-+          title="Fr33d0m Terminal"
-+          src="/terminal/"
-+          className="w-full h-full border-0"
-+        />
-+      </div>
-+    </div>
++    <EmbeddedTtyView
++      title="Fr33d0m Terminal"
++      description="Full browser shell access for Fr33d0m. Use it to run chat, setup, gateway, pairing, and any other operator commands."
++      routeBase="/terminal"
++      accentLabel="Control"
++      commands={[
++        { label: 'Start chat', command: 'fr33d0m' },
++        { label: 'Configure API key', command: 'fr33d0m setup' },
++        { label: 'Restart gateway', command: 'fr33d0m gateway restart' },
++        { label: 'Doctor check', command: 'fr33d0m doctor' },
++      ]}
++    />
 +  )
 +}
 diff --git a/pyproject.toml b/pyproject.toml
@@ -1181,6 +2261,158 @@ index e1a538d..07fc8a3 100644
 -    return token == expected
 +    supplied = token or websocket.cookies.get("fr33d0m_webui_token") or websocket.cookies.get("hermes_webui_token")
 +    return bool(supplied and supplied == expected)
+diff --git a/webui/routers/admin_actions.py b/webui/routers/admin_actions.py
+new file mode 100644
+index 0000000..e9fc467
+--- /dev/null
++++ b/webui/routers/admin_actions.py
+@@ -0,0 +1,146 @@
++"""Allowlisted admin action endpoints for the dashboard."""
++
++from __future__ import annotations
++
++import os
++import shutil
++import subprocess
++from pathlib import Path
++
++from fastapi import APIRouter, Depends, HTTPException
++
++from webui.auth import require_auth
++from webui.hermes_bridge import HERMES_HOME, init_hermes_path
++from webui.schemas.admin_actions import (
++    CommandActionResponse,
++    DoctorActionRequest,
++    PairingApproveRequest,
++    PairingClearRequest,
++    PairingMutationResponse,
++    PairingRevokeRequest,
++    PairingStateResponse,
++)
++
++router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_auth)])
++
++
++def _runtime_env() -> dict[str, str]:
++    env = os.environ.copy()
++    env["HERMES_HOME"] = str(HERMES_HOME)
++
++    local_bin = str(Path.home() / ".local" / "bin")
++    env["PATH"] = ":".join([local_bin, "/usr/local/bin", "/usr/bin", "/bin", env.get("PATH", "")])
++
++    runtime_dir = Path(f"/run/user/{os.getuid()}")
++    if runtime_dir.exists():
++        env["XDG_RUNTIME_DIR"] = str(runtime_dir)
++        bus_path = runtime_dir / "bus"
++        if bus_path.exists():
++            env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
++
++    return env
++
++
++def _cli_command() -> str:
++    for candidate in (
++        shutil.which("fr33d0m"),
++        str(Path.home() / ".local" / "bin" / "fr33d0m"),
++        shutil.which("hermes"),
++    ):
++        if candidate and Path(candidate).exists():
++            return candidate
++    raise HTTPException(status_code=500, detail="Could not locate fr33d0m/hermes CLI")
++
++
++def _run_cli(action: str, args: list[str], timeout: int = 180) -> CommandActionResponse:
++    cmd = [_cli_command(), *args]
++    result = subprocess.run(
++        cmd,
++        capture_output=True,
++        text=True,
++        env=_runtime_env(),
++        timeout=timeout,
++    )
++    return CommandActionResponse(
++        success=result.returncode == 0,
++        action=action,
++        exit_code=result.returncode,
++        stdout=result.stdout,
++        stderr=result.stderr,
++    )
++
++
++def _pairing_store():
++    init_hermes_path()
++    from gateway.pairing import PairingStore
++
++    return PairingStore()
++
++
++@router.post("/gateway/start", response_model=CommandActionResponse)
++async def gateway_start() -> CommandActionResponse:
++    return _run_cli("gateway:start", ["gateway", "start"])
++
++
++@router.post("/gateway/stop", response_model=CommandActionResponse)
++async def gateway_stop() -> CommandActionResponse:
++    return _run_cli("gateway:stop", ["gateway", "stop"])
++
++
++@router.post("/gateway/restart", response_model=CommandActionResponse)
++async def gateway_restart() -> CommandActionResponse:
++    return _run_cli("gateway:restart", ["gateway", "restart"])
++
++
++@router.post("/doctor", response_model=CommandActionResponse)
++async def doctor_action(req: DoctorActionRequest) -> CommandActionResponse:
++    args = ["doctor"]
++    action = "doctor"
++    if req.fix:
++        args.append("--fix")
++        action = "doctor:fix"
++    return _run_cli(action, args, timeout=240)
++
++
++@router.get("/pairing", response_model=PairingStateResponse)
++async def pairing_state() -> PairingStateResponse:
++    store = _pairing_store()
++    return PairingStateResponse(
++        pending=store.list_pending(),
++        approved=store.list_approved(),
++    )
++
++
++@router.post("/pairing/approve", response_model=PairingMutationResponse)
++async def pairing_approve(req: PairingApproveRequest) -> PairingMutationResponse:
++    store = _pairing_store()
++    result = store.approve_code(req.platform, req.code)
++    if not result:
++        raise HTTPException(status_code=404, detail="Pairing code not found or expired")
++    return PairingMutationResponse(
++        success=True,
++        message=f"Approved {result['user_name'] or result['user_id']} on {req.platform}",
++    )
++
++
++@router.post("/pairing/revoke", response_model=PairingMutationResponse)
++async def pairing_revoke(req: PairingRevokeRequest) -> PairingMutationResponse:
++    store = _pairing_store()
++    removed = store.revoke(req.platform, req.user_id)
++    if not removed:
++        raise HTTPException(status_code=404, detail="Approved user not found")
++    return PairingMutationResponse(
++        success=True,
++        message=f"Revoked {req.user_id} on {req.platform}",
++    )
++
++
++@router.post("/pairing/clear-pending", response_model=PairingMutationResponse)
++async def pairing_clear_pending(req: PairingClearRequest) -> PairingMutationResponse:
++    store = _pairing_store()
++    removed = store.clear_pending(req.platform)
++    label = req.platform or "all platforms"
++    return PairingMutationResponse(
++        success=True,
++        message=f"Cleared {removed} pending pairing request(s) for {label}",
++    )
 diff --git a/webui/routers/gateway_config.py b/webui/routers/gateway_config.py
 new file mode 100644
 index 0000000..06d9268
@@ -1538,6 +2770,219 @@ index 0000000..06d9268
 +        platform=platform,
 +        message="Required fields are present. Restart the gateway to apply changes.",
 +    )
+diff --git a/webui/routers/skills.py b/webui/routers/skills.py
+index cd35c6f..668d22f 100644
+--- a/webui/routers/skills.py
++++ b/webui/routers/skills.py
+@@ -1,14 +1,21 @@
+-"""Skills browser endpoints."""
++"""Skills browser and custom-skill CRUD endpoints."""
+ 
++import shutil
+ import re
+ from pathlib import Path
+ from typing import Optional
+ 
+ import yaml
+-from fastapi import APIRouter, Depends, HTTPException
++from fastapi import APIRouter, Body, Depends, HTTPException
+ 
+ from webui.auth import require_auth
+ from webui.hermes_bridge import get_custom_skills_dir, get_session_db, get_skills_dir
++from webui.schemas.skills_editor import (
++    CustomSkillCreateRequest,
++    CustomSkillDeleteRequest,
++    CustomSkillMutationResponse,
++    CustomSkillUpdateRequest,
++)
+ 
+ router = APIRouter(prefix="/api/skills", tags=["skills"], dependencies=[Depends(require_auth)])
+ 
+@@ -112,6 +119,31 @@ def _build_skill_info(entry: Path, category: str | None) -> dict:
+     return skill_info
+ 
+ 
++def _slugify_skill_name(value: str) -> str:
++    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", value.strip().lower()).strip("-")
++    slug = re.sub(r"-{2,}", "-", slug)
++    return slug
++
++
++def _safe_custom_skill_dir(dir_name: str, category: str = "") -> tuple[Path, str, str | None]:
++    base = get_custom_skills_dir().resolve()
++    safe_dir = _slugify_skill_name(dir_name)
++    safe_category = _slugify_skill_name(category) if category else ""
++    if not safe_dir:
++        raise HTTPException(status_code=400, detail="Invalid skill directory name")
++
++    target = base / safe_dir if not safe_category else base / safe_category / safe_dir
++    resolved = target.resolve()
++    if base not in resolved.parents and resolved != base:
++        raise HTTPException(status_code=400, detail="Invalid custom skill path")
++    return resolved, safe_dir, safe_category or None
++
++
++def _skill_template(name: str, description: str) -> str:
++    clean_description = description.strip() or "Short description of what this skill helps with."
++    return f"""---\nname: {name}\ndescription: {clean_description}\n---\n\n# {name}\n\n## When to Use\n\nDescribe when this skill should be activated.\n\n## Workflow\n\n1. Describe the first step.\n2. Describe the second step.\n3. Describe the expected output.\n"""
++
++
+ @router.get("/builtin")
+ async def list_builtin_skills():
+     """List built-in skills from the hermes-agent skills directory."""
+@@ -222,3 +254,64 @@ async def skill_usage():
+     finally:
+         if hasattr(db, "close"):
+             db.close()
++
++
++@router.post("/custom", response_model=CustomSkillMutationResponse)
++async def create_custom_skill(req: CustomSkillCreateRequest):
++    """Create a custom skill under ~/.hermes/skills."""
++    target_dir, safe_dir, safe_category = _safe_custom_skill_dir(req.dir_name or req.name, req.category)
++    if target_dir.exists():
++        raise HTTPException(status_code=409, detail="Custom skill already exists")
++
++    target_dir.mkdir(parents=True, exist_ok=False)
++    content = req.content.strip() or _skill_template(req.name.strip(), req.description)
++    (target_dir / "SKILL.md").write_text(content.rstrip() + "\n", encoding="utf-8")
++
++    return CustomSkillMutationResponse(
++        success=True,
++        dir_name=safe_dir,
++        category=safe_category,
++        path=str(target_dir),
++        message="Custom skill created",
++    )
++
++
++@router.patch("/custom/{dir_name}", response_model=CustomSkillMutationResponse)
++async def update_custom_skill(dir_name: str, req: CustomSkillUpdateRequest):
++    """Update the SKILL.md file for a custom skill."""
++    target_dir, safe_dir, safe_category = _safe_custom_skill_dir(dir_name, req.category)
++    skill_file = target_dir / "SKILL.md"
++    if not skill_file.exists():
++        raise HTTPException(status_code=404, detail="Custom skill not found")
++
++    skill_file.write_text(req.content.rstrip() + "\n", encoding="utf-8")
++
++    return CustomSkillMutationResponse(
++        success=True,
++        dir_name=safe_dir,
++        category=safe_category,
++        path=str(target_dir),
++        message="Custom skill updated",
++    )
++
++
++@router.delete("/custom/{dir_name}", response_model=CustomSkillMutationResponse)
++async def delete_custom_skill(dir_name: str, req: CustomSkillDeleteRequest = Body(default=CustomSkillDeleteRequest())):
++    """Delete a custom skill directory."""
++    target_dir, safe_dir, safe_category = _safe_custom_skill_dir(dir_name, req.category)
++    if not target_dir.exists():
++        raise HTTPException(status_code=404, detail="Custom skill not found")
++
++    shutil.rmtree(target_dir)
++    if safe_category:
++        category_dir = get_custom_skills_dir() / safe_category
++        if category_dir.exists() and not any(category_dir.iterdir()):
++            category_dir.rmdir()
++
++    return CustomSkillMutationResponse(
++        success=True,
++        dir_name=safe_dir,
++        category=safe_category,
++        path=str(target_dir),
++        message="Custom skill deleted",
++    )
+diff --git a/webui/schemas/admin_actions.py b/webui/schemas/admin_actions.py
+new file mode 100644
+index 0000000..d9550ac
+--- /dev/null
++++ b/webui/schemas/admin_actions.py
+@@ -0,0 +1,82 @@
++"""Pydantic models for dashboard action endpoints."""
++
++from __future__ import annotations
++
++from typing import Literal
++
++from pydantic import BaseModel, Field
++
++
++class CommandActionResponse(BaseModel):
++    """Result of running an allowlisted admin command."""
++
++    success: bool
++    action: str
++    exit_code: int
++    stdout: str = ""
++    stderr: str = ""
++
++
++class DoctorActionRequest(BaseModel):
++    """Request to run doctor or doctor --fix."""
++
++    fix: bool = False
++
++
++class PairingPendingEntry(BaseModel):
++    """Pending pairing request."""
++
++    platform: str
++    code: str
++    user_id: str
++    user_name: str = ""
++    age_minutes: int = 0
++
++
++class PairingApprovedEntry(BaseModel):
++    """Approved pairing entry."""
++
++    platform: str
++    user_id: str
++    user_name: str = ""
++    approved_at: float
++
++
++class PairingStateResponse(BaseModel):
++    """Pending and approved pairing state."""
++
++    pending: list[PairingPendingEntry] = Field(default_factory=list)
++    approved: list[PairingApprovedEntry] = Field(default_factory=list)
++
++
++class PairingApproveRequest(BaseModel):
++    """Approve a pairing code."""
++
++    platform: str
++    code: str
++
++
++class PairingRevokeRequest(BaseModel):
++    """Revoke a paired user."""
++
++    platform: str
++    user_id: str
++
++
++class PairingMutationResponse(BaseModel):
++    """Pairing mutation result."""
++
++    success: bool
++    message: str
++
++
++class PairingClearRequest(BaseModel):
++    """Clear pending pairings for one or all platforms."""
++
++    platform: str | None = None
++
++
++class ServiceActionRequest(BaseModel):
++    """Lifecycle action for a service."""
++
++    action: Literal["start", "stop", "restart"]
 diff --git a/webui/schemas/gateway_config.py b/webui/schemas/gateway_config.py
 new file mode 100644
 index 0000000..1ad0d9a
@@ -1612,8 +3057,44 @@ index 0000000..1ad0d9a
 +    platform: str
 +    message: str
 +    missing_fields: list[str] = Field(default_factory=list)
+diff --git a/webui/schemas/skills_editor.py b/webui/schemas/skills_editor.py
+new file mode 100644
+index 0000000..4973944
+--- /dev/null
++++ b/webui/schemas/skills_editor.py
+@@ -0,0 +1,30 @@
++"""Pydantic models for custom skill CRUD endpoints."""
++
++from __future__ import annotations
++
++from pydantic import BaseModel
++
++
++class CustomSkillCreateRequest(BaseModel):
++    name: str
++    dir_name: str = ""
++    category: str = ""
++    description: str = ""
++    content: str = ""
++
++
++class CustomSkillUpdateRequest(BaseModel):
++    category: str = ""
++    content: str
++
++
++class CustomSkillDeleteRequest(BaseModel):
++    category: str = ""
++
++
++class CustomSkillMutationResponse(BaseModel):
++    success: bool
++    dir_name: str
++    category: str | None = None
++    path: str
++    message: str
 diff --git a/webui/server.py b/webui/server.py
-index e9c6003..b0e5d59 100644
+index e9c6003..d21ef62 100644
 --- a/webui/server.py
 +++ b/webui/server.py
 @@ -1,41 +1,137 @@
@@ -1643,7 +3124,7 @@ index e9c6003..b0e5d59 100644
  from webui.config import get_webui_config
  from webui.hermes_bridge import init_hermes_path
 -from webui.routers import config_editor, cron, gateway_status, health, search, sessions, skills
-+from webui.routers import config_editor, cron, gateway_config, gateway_status, health, search, sessions, skills
++from webui.routers import admin_actions, config_editor, cron, gateway_config, gateway_status, health, search, sessions, skills
  from webui.websocket.hook_bridge import bridge
  from webui.websocket.hub import hub
  
@@ -1780,7 +3261,7 @@ index e9c6003..b0e5d59 100644
      app.add_middleware(
          CORSMiddleware,
          allow_origins=config.cors_origins,
-@@ -59,27 +154,47 @@ def create_app() -> FastAPI:
+@@ -59,27 +154,48 @@ def create_app() -> FastAPI:
          allow_headers=["*"],
      )
  
@@ -1790,6 +3271,7 @@ index e9c6003..b0e5d59 100644
      app.include_router(search.router)
      app.include_router(gateway_status.router)
 +    app.include_router(gateway_config.router)
++    app.include_router(admin_actions.router)
      app.include_router(config_editor.router)
      app.include_router(skills.router)
      app.include_router(cron.router)
@@ -1836,7 +3318,7 @@ index e9c6003..b0e5d59 100644
              raw = await websocket.receive_text()
              try:
                  msg = json.loads(raw)
-@@ -96,17 +211,14 @@ def create_app() -> FastAPI:
+@@ -96,17 +212,14 @@ def create_app() -> FastAPI:
                  await websocket.close(code=4003, reason="Invalid token")
                  return
  
@@ -1854,7 +3336,7 @@ index e9c6003..b0e5d59 100644
                  try:
                      msg = json.loads(data)
                      if msg.get("type") == "ping":
-@@ -122,19 +234,14 @@ def create_app() -> FastAPI:
+@@ -122,19 +235,14 @@ def create_app() -> FastAPI:
          finally:
              await hub.disconnect(websocket)
  

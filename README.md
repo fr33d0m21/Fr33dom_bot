@@ -51,10 +51,20 @@ The Fr33d0m dashboard on port `8643` now acts as the main hub:
 
 | Route | What it does |
 |-------|---------------|
-| `/` | Fr33d0m Hub dashboard |
-| `/gateway` | Configure messaging gateways with a card-based UI |
-| `/terminal` | Browser terminal for the `fr33d0m` CLI |
-| `/neurovision` | Browser view of the curses visualizer via `ttyd` |
+| `/` | Fr33d0m Hub dashboard with gateway controls, doctor/fix buttons, and OpenRouter MiniMax setup |
+| `/gateway` | Configure messaging gateways with cards, tests, and pairing approval buttons |
+| `/terminal` | Browser terminal with reconnect controls and a full shell welcome banner |
+| `/neurovision` | Browser view of the curses visualizer via `ttyd` with reconnect support |
+| `/skills` | Manage custom skills: create, edit `SKILL.md`, and delete |
+
+### Dashboard-first setup flow
+
+1. Log into the dashboard
+2. Enter `OPENROUTER_API_KEY`
+3. Apply the default model `minimax/minimax-m2.7`
+4. Use the dashboard buttons to start or restart the gateway
+5. Configure messaging platforms in `/gateway`
+6. Use `/terminal` for shell access and `/skills` for custom skill management
 
 ## Services (autostart on boot)
 
@@ -64,7 +74,7 @@ Four systemd user services are enabled during install:
 |---------|------|-------------|
 | `fr33d0m-webui` | 8643 | Web dashboard — sessions, config, cron, skills |
 | `fr33d0m-gateway` | — | Messaging gateway (Telegram, Discord, Slack, WhatsApp, Signal) |
-| `fr33d0m-terminal` | 7681 (localhost only) | `ttyd` browser terminal for the Fr33d0m CLI |
+| `fr33d0m-terminal` | 7681 (localhost only) | `ttyd` browser terminal with a full Fr33d0m shell |
 | `fr33d0m-neurovision-web` | 7682 (localhost only) | `ttyd` browser view of neurovision |
 
 ```bash
@@ -126,6 +136,7 @@ Fr33dom_bot/
 ├── .env.example              # API key template
 ├── bin/
 │   ├── fr33d0m               # Main command (wraps hermes)
+│   ├── fr33d0m-terminal-shell # Shell banner used by the browser terminal
 │   ├── fr33d0m-webui         # Web dashboard launcher
 │   └── fr33d0m-neurovision   # Terminal visualizer launcher
 ├── patches/

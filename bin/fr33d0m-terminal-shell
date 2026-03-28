@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+clear
+cat <<'EOF'
+============================================================
+                    FR33D0M TERMINAL
+============================================================
+
+This is full shell access for your Fr33d0m server.
+
+Common commands:
+  fr33d0m                    Start interactive agent chat
+  fr33d0m setup              Configure API keys and provider
+  fr33d0m gateway restart    Restart messaging gateway
+  fr33d0m doctor             Diagnose runtime issues
+  fr33d0m pairing list       View pending and approved pairings
+  fr33d0m skills list        Browse installed skills
+
+Useful files:
+  ~/.hermes/.env
+  ~/.hermes/config.yaml
+  ~/Fr33dom_bot
+
+Tips:
+  - Use the dashboard Reconnect button if this view drops.
+  - Type 'exit' to stop the shell, or just close the browser tab.
+
+============================================================
+EOF
+
+if [ -f "$HOME/.bashrc" ]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.bashrc"
+fi
+
+exec /bin/bash -il
