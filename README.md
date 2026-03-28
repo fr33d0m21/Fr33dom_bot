@@ -21,7 +21,7 @@ source ~/.bashrc
 fr33d0m setup
 ```
 
-The installer handles everything: Hermes Agent, Python/Node.js dependencies, all extensions, the `fr33d0m` command, and systemd autostart services.
+The installer handles everything: Hermes Agent, Python/Node.js dependencies, all extensions, the `fr33d0m` command, the Fr33d0m dashboard patch for `hermes-webui`, and systemd autostart services.
 
 ## Commands
 
@@ -41,20 +41,33 @@ The installer handles everything: Hermes Agent, Python/Node.js dependencies, all
 
 All `fr33d0m` commands map directly to `hermes` — every Hermes command works.
 
+## Dashboard Views
+
+The Fr33d0m dashboard on port `8643` now acts as the main hub:
+
+| Route | What it does |
+|-------|---------------|
+| `/` | Fr33d0m Hub dashboard |
+| `/gateway` | Configure messaging gateways with a card-based UI |
+| `/terminal` | Browser terminal for the `fr33d0m` CLI |
+| `/neurovision` | Browser view of the curses visualizer via `ttyd` |
+
 ## Services (autostart on boot)
 
-Three systemd user services are enabled during install:
+Four systemd user services are enabled during install:
 
 | Service | Port | What it does |
 |---------|------|-------------|
 | `fr33d0m-webui` | 8643 | Web dashboard — sessions, config, cron, skills |
 | `fr33d0m-gateway` | — | Messaging gateway (Telegram, Discord, Slack, WhatsApp, Signal) |
-| `fr33d0m-neurovision` | — | Terminal visualizer daemon |
+| `fr33d0m-terminal` | 7681 (localhost only) | `ttyd` browser terminal for the Fr33d0m CLI |
+| `fr33d0m-neurovision-web` | 7682 (localhost only) | `ttyd` browser view of neurovision |
 
 ```bash
 systemctl --user status fr33d0m-webui
 systemctl --user status fr33d0m-gateway
-systemctl --user status fr33d0m-neurovision
+systemctl --user status fr33d0m-terminal
+systemctl --user status fr33d0m-neurovision-web
 
 systemctl --user restart fr33d0m-webui
 systemctl --user stop fr33d0m-gateway
@@ -111,6 +124,8 @@ Fr33dom_bot/
 │   ├── fr33d0m               # Main command (wraps hermes)
 │   ├── fr33d0m-webui         # Web dashboard launcher
 │   └── fr33d0m-neurovision   # Terminal visualizer launcher
+├── patches/
+│   └── hermes-webui.patch    # Rebrand + dashboard extensions applied after clone
 ├── systemd/                  # Reference service unit files
 ├── config/
 │   ├── config.yaml           # Display config (fr33d0m-skin active)

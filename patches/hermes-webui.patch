@@ -1,0 +1,1874 @@
+diff --git a/frontend/index.html b/frontend/index.html
+index 748f00f..ac6bd8f 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -4,7 +4,7 @@
+     <meta charset="UTF-8" />
+     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-    <title>Hermes WebUI</title>
++    <title>Fr33d0m</title>
+   </head>
+   <body>
+     <div id="root"></div>
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 3889e40..9764690 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,4 +1,4 @@
+-import { useState, useCallback } from 'react'
++import { useState, useCallback, useEffect } from 'react'
+ import { Routes, Route } from 'react-router-dom'
+ import { Sidebar } from './components/layout/Sidebar'
+ import { Header } from './components/layout/Header'
+@@ -8,6 +8,9 @@ import { SessionDetail } from './pages/SessionDetail'
+ import { Config } from './pages/Config'
+ import { Cron } from './pages/Cron'
+ import { Skills } from './pages/Skills'
++import { Gateway } from './pages/Gateway'
++import { Terminal } from './pages/Terminal'
++import { Neurovision } from './pages/Neurovision'
+ import { useWebSocket } from './hooks/useWebSocket'
+ import { setToken } from './api/client'
+ 
+@@ -38,10 +41,10 @@ function LoginForm({ onLogin }: { onLogin: (token: string) => void }) {
+       <form onSubmit={handleSubmit} className="rounded-xl border p-8 w-96 space-y-4"
+         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+         <h1 className="text-xl font-bold text-center" style={{ color: 'var(--color-primary)' }}>
+-          Hermes WebUI
++          Fr33d0m
+         </h1>
+         <p className="text-sm text-center" style={{ color: 'var(--color-text-muted)' }}>
+-          Enter your auth token to continue
++          Enter your dashboard token to continue
+         </p>
+         <input
+           type="password"
+@@ -55,7 +58,7 @@ function LoginForm({ onLogin }: { onLogin: (token: string) => void }) {
+         {error && <p className="text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>}
+         <button type="submit" className="w-full py-2 rounded-lg text-sm font-medium text-white"
+           style={{ backgroundColor: 'var(--color-primary)' }}>
+-          Login
++          Unlock Dashboard
+         </button>
+       </form>
+     </div>
+@@ -70,6 +73,12 @@ export default function App() {
+ 
+   const { connected } = useWebSocket(token)
+ 
++  useEffect(() => {
++    if (token) {
++      setToken(token)
++    }
++  }, [token])
++
+   const handleLogin = useCallback((t: string) => {
+     setToken(t)
+     setTokenState(t)
+@@ -104,6 +113,9 @@ export default function App() {
+             <Route path="/" element={<Dashboard />} />
+             <Route path="/sessions" element={<Sessions />} />
+             <Route path="/sessions/:id" element={<SessionDetail />} />
++            <Route path="/terminal" element={<Terminal />} />
++            <Route path="/neurovision" element={<Neurovision />} />
++            <Route path="/gateway" element={<Gateway />} />
+             <Route path="/config" element={<Config />} />
+             <Route path="/cron" element={<Cron />} />
+             <Route path="/skills" element={<Skills />} />
+diff --git a/frontend/src/api/client.ts b/frontend/src/api/client.ts
+index 103ce21..d1b4693 100644
+--- a/frontend/src/api/client.ts
++++ b/frontend/src/api/client.ts
+@@ -1,21 +1,30 @@
+ const API_BASE = '/api'
++const TOKEN_STORAGE_KEY = 'hermes_webui_token'
++const TOKEN_COOKIE_KEY = 'fr33d0m_webui_token'
+ 
+ function getToken(): string {
+-  return sessionStorage.getItem('hermes_webui_token') || ''
++  return sessionStorage.getItem(TOKEN_STORAGE_KEY) || ''
++}
++
++function clearToken(): void {
++  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
++  document.cookie = `${TOKEN_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Strict`
+ }
+ 
+ export function setToken(token: string): void {
+-  sessionStorage.setItem('hermes_webui_token', token)
++  sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
++  document.cookie = `${TOKEN_COOKIE_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Strict`
+ }
+ 
+ export function hasToken(): boolean {
+-  return !!sessionStorage.getItem('hermes_webui_token')
++  return !!sessionStorage.getItem(TOKEN_STORAGE_KEY)
+ }
+ 
+ async function request<T>(path: string, options?: RequestInit): Promise<T> {
+   const token = getToken()
+   const res = await fetch(`${API_BASE}${path}`, {
+     ...options,
++    credentials: 'same-origin',
+     headers: {
+       'Content-Type': 'application/json',
+       'X-Hermes-Token': token,
+@@ -25,7 +34,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
+ 
+   if (!res.ok) {
+     if (res.status === 401) {
+-      sessionStorage.removeItem('hermes_webui_token')
++      clearToken()
+       throw new Error('Authentication required')
+     }
+     const body = await res.text()
+@@ -73,6 +82,16 @@ export const api = {
+ 
+   // Gateway
+   gatewayStatus: () => request<import('./types').GatewayStatus>('/gateway/status'),
++  gatewayConfig: () => request<import('./types').GatewayConfigResponse>('/gateway/config'),
++  patchGatewayConfig: (platform: string, payload: { fields?: Record<string, unknown>; config?: Record<string, unknown> }) =>
++    request<import('./types').GatewayConfigPatchResponse>(`/gateway/config/${platform}`, {
++      method: 'PATCH',
++      body: JSON.stringify(payload),
++    }),
++  testGatewayPlatform: (platform: string) =>
++    request<import('./types').GatewayTestResponse>(`/gateway/test/${platform}`, {
++      method: 'POST',
++    }),
+ 
+   // Config
+   config: () => request<import('./types').ConfigResponse>('/config'),
+diff --git a/frontend/src/api/types.ts b/frontend/src/api/types.ts
+index 5cc0111..e2e5b60 100644
+--- a/frontend/src/api/types.ts
++++ b/frontend/src/api/types.ts
+@@ -72,6 +72,52 @@ export interface GatewayStatus {
+   }>
+ }
+ 
++export interface GatewayField {
++  key: string
++  label: string
++  value: string
++  help: string
++  placeholder: string
++  input_type: 'text' | 'password' | 'select'
++  configured: boolean
++  sensitive: boolean
++  required: boolean
++  options: string[]
++}
++
++export interface GatewayPlatformConfig {
++  key: string
++  label: string
++  emoji: string
++  docs_url: string | null
++  configured: boolean
++  status: string
++  description: string
++  pairing_hint: string | null
++  fields: GatewayField[]
++}
++
++export interface GatewayConfigResponse {
++  gateway_allow_all_users: boolean
++  unauthorized_dm_behavior: string
++  platforms: GatewayPlatformConfig[]
++}
++
++export interface GatewayConfigPatchResponse {
++  success: boolean
++  platform: string
++  updated_fields: string[]
++  updated_config: string[]
++  requires_restart: boolean
++}
++
++export interface GatewayTestResponse {
++  success: boolean
++  platform: string
++  message: string
++  missing_fields: string[]
++}
++
+ export interface ConfigResponse {
+   config: Record<string, unknown>
+ }
+diff --git a/frontend/src/components/layout/Header.tsx b/frontend/src/components/layout/Header.tsx
+index 4496915..87cfa41 100644
+--- a/frontend/src/components/layout/Header.tsx
++++ b/frontend/src/components/layout/Header.tsx
+@@ -24,6 +24,9 @@ export function Header({ connected, onThemeToggle, theme, onMenuToggle }: Header
+           className="w-2 h-2 rounded-full"
+           style={{ backgroundColor: connected ? 'var(--color-success)' : 'var(--color-error)' }}
+         />
++        <span className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>
++          Fr33d0m
++        </span>
+         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+           {connected ? 'Connected' : 'Disconnected'}
+         </span>
+diff --git a/frontend/src/components/layout/Sidebar.tsx b/frontend/src/components/layout/Sidebar.tsx
+index 211c449..a973bd8 100644
+--- a/frontend/src/components/layout/Sidebar.tsx
++++ b/frontend/src/components/layout/Sidebar.tsx
+@@ -2,12 +2,30 @@ import { useQuery } from '@tanstack/react-query'
+ import { NavLink } from 'react-router-dom'
+ import { api } from '../../api/client'
+ 
+-const navItems = [
+-  { path: '/', label: 'Dashboard', icon: '◉' },
+-  { path: '/sessions', label: 'Sessions', icon: '◧' },
+-  { path: '/config', label: 'Config', icon: '⚙' },
+-  { path: '/cron', label: 'Cron', icon: '⏱' },
+-  { path: '/skills', label: 'Skills', icon: '✦' },
++const navSections = [
++  {
++    label: 'Overview',
++    items: [
++      { path: '/', label: 'Hub', icon: '◉' },
++      { path: '/sessions', label: 'Sessions', icon: '◧' },
++    ],
++  },
++  {
++    label: 'Control',
++    items: [
++      { path: '/terminal', label: 'Terminal', icon: '⌘' },
++      { path: '/neurovision', label: 'Neurovision', icon: '◎' },
++      { path: '/gateway', label: 'Gateway', icon: '⇄' },
++    ],
++  },
++  {
++    label: 'Admin',
++    items: [
++      { path: '/config', label: 'Config', icon: '⚙' },
++      { path: '/cron', label: 'Cron', icon: '⏱' },
++      { path: '/skills', label: 'Skills', icon: '✦' },
++    ],
++  },
+ ]
+ 
+ interface SidebarProps {
+@@ -45,10 +63,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
+         <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
+           <div>
+             <h1 className="text-lg font-bold" style={{ color: 'var(--color-primary)' }}>
+-              Hermes WebUI
++              Fr33d0m
+             </h1>
+             <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+-              Agent Monitor
++              Agent Dashboard
+             </p>
+           </div>
+           {/* Close button — mobile only */}
+@@ -61,33 +79,43 @@ export function Sidebar({ open, onClose }: SidebarProps) {
+           </button>
+         </div>
+         <nav className="flex-1 p-2">
+-          {navItems.map((item) => (
+-            <NavLink
+-              key={item.path}
+-              to={item.path}
+-              onClick={onClose}
+-              className={({ isActive }) =>
+-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm mb-1 transition-colors ${
+-                  isActive ? 'font-medium' : ''
+-                }`
+-              }
+-              style={({ isActive }) => ({
+-                backgroundColor: isActive ? 'var(--color-surface-hover)' : 'transparent',
+-                color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
+-              })}
+-            >
+-              <span className="text-base">{item.icon}</span>
+-              {item.label}
+-            </NavLink>
++          {navSections.map((section) => (
++            <div key={section.label} className="mb-4">
++              <div
++                className="px-3 pb-1 text-[10px] uppercase tracking-[0.18em]"
++                style={{ color: 'var(--color-text-muted)' }}
++              >
++                {section.label}
++              </div>
++              {section.items.map((item) => (
++                <NavLink
++                  key={item.path}
++                  to={item.path}
++                  onClick={onClose}
++                  className={({ isActive }) =>
++                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm mb-1 transition-colors ${
++                      isActive ? 'font-medium' : ''
++                    }`
++                  }
++                  style={({ isActive }) => ({
++                    backgroundColor: isActive ? 'var(--color-surface-hover)' : 'transparent',
++                    color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
++                  })}
++                >
++                  <span className="text-base">{item.icon}</span>
++                  {item.label}
++                </NavLink>
++              ))}
++            </div>
+           ))}
+         </nav>
+         <div className="p-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+           <div className="flex items-center justify-between">
+             <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+-              Sancho Muzax
++              fr33d0m21
+             </span>
+             <a
+-              href="https://github.com/sanchomuzax/hermes-webui"
++              href="https://github.com/fr33d0m21/Fr33dom_bot"
+               target="_blank"
+               rel="noopener noreferrer"
+               className="hover:opacity-80"
+diff --git a/frontend/src/index.css b/frontend/src/index.css
+index d34ddcc..3584e67 100644
+--- a/frontend/src/index.css
++++ b/frontend/src/index.css
+@@ -1,27 +1,33 @@
+ @import "tailwindcss";
+ 
+ :root {
+-  --color-bg: #0f172a;
+-  --color-surface: #1e293b;
+-  --color-surface-hover: #334155;
+-  --color-border: #334155;
+-  --color-text: #e2e8f0;
+-  --color-text-muted: #94a3b8;
+-  --color-primary: #6366f1;
+-  --color-primary-hover: #818cf8;
+-  --color-success: #22c55e;
+-  --color-warning: #f59e0b;
+-  --color-error: #ef4444;
+-  --color-info: #3b82f6;
++  --color-bg: #06100f;
++  --color-surface: #0b171f;
++  --color-surface-hover: #122633;
++  --color-border: #173549;
++  --color-text: #e2efff;
++  --color-text-muted: #8aa3c7;
++  --color-primary: #2bfd1c;
++  --color-primary-hover: #7bff71;
++  --color-success: #2bfd1c;
++  --color-warning: #ffc857;
++  --color-error: #ff6b8f;
++  --color-info: #8ea3ff;
+ }
+ 
+ [data-theme="light"] {
+-  --color-bg: #f8fafc;
++  --color-bg: #f4fbf8;
+   --color-surface: #ffffff;
+-  --color-surface-hover: #f1f5f9;
+-  --color-border: #e2e8f0;
+-  --color-text: #1e293b;
+-  --color-text-muted: #64748b;
++  --color-surface-hover: #eef6ff;
++  --color-border: #d5e6ef;
++  --color-text: #0f1b29;
++  --color-text-muted: #5f7696;
++  --color-primary: #10b81a;
++  --color-primary-hover: #2bfd1c;
++  --color-success: #10b81a;
++  --color-warning: #c98200;
++  --color-error: #cf355f;
++  --color-info: #5d72e6;
+ }
+ 
+ body {
+diff --git a/frontend/src/pages/Dashboard.tsx b/frontend/src/pages/Dashboard.tsx
+index 6070c85..1336a46 100644
+--- a/frontend/src/pages/Dashboard.tsx
++++ b/frontend/src/pages/Dashboard.tsx
+@@ -21,6 +21,18 @@ export function Dashboard() {
+     queryFn: () => api.sessions({ limit: 30 }),
+     refetchInterval: 5000,
+   })
++  const { data: cronData } = useQuery({
++    queryKey: ['cron-jobs'],
++    queryFn: api.cronJobs,
++  })
++  const { data: builtinSkills } = useQuery({
++    queryKey: ['builtin-skills'],
++    queryFn: api.builtinSkills,
++  })
++  const { data: customSkills } = useQuery({
++    queryKey: ['custom-skills'],
++    queryFn: api.customSkills,
++  })
+ 
+   // Sort: active sessions first, then by last_active/started_at desc
+   const sortedSessions = [...(sessionsData?.sessions || [])].sort((a, b) => {
+@@ -39,12 +51,19 @@ export function Dashboard() {
+   const services = gateway?.platforms?.filter(
+     (p) => p.details && (p.details as Record<string, unknown>).type === 'service'
+   ) || []
++  const connectedCount = gatewayPlatforms.filter((platform) => platform.connected).length
++  const skillCount = (builtinSkills?.skills.length || 0) + (customSkills?.skills.length || 0)
++  const cronEnabled = cronData?.jobs.filter((job) => job.enabled).length || 0
+ 
+   return (
+-    <div className="p-4 flex flex-col gap-4 md:h-full">
+-      <h2 className="text-xl font-semibold flex-shrink-0">Dashboard</h2>
++    <div className="p-6 flex flex-col gap-6 md:h-full">
++      <div className="flex flex-col gap-2 flex-shrink-0">
++        <h2 className="text-2xl font-semibold">Fr33d0m Hub</h2>
++        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++          Launch the live terminal, watch neurovision, configure gateways, and manage the agent from one place.
++        </p>
++      </div>
+ 
+-      {/* Stats Cards */}
+       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 flex-shrink-0">
+         <StatCard label="Total Sessions" value={stats?.total_sessions ?? '...'} />
+         <StatCard label="Total Messages" value={stats?.total_messages ?? '...'} />
+@@ -59,9 +78,64 @@ export function Dashboard() {
+         />
+       </div>
+ 
+-      {/* Platforms & Services */}
++      <div className="grid gap-4 lg:grid-cols-3">
++        <HubCard
++          to="/terminal"
++          title="Chat Terminal"
++          description="Launch the live Fr33d0m CLI in your browser for setup, pairing, and direct chat."
++          eyebrow="Control"
++          accent="var(--color-primary)"
++          stat={`${gateway?.running ? 'Gateway live' : 'Ready to launch'}`}
++        />
++        <HubCard
++          to="/neurovision"
++          title="Neurovision"
++          description="Open the browser view of the terminal visualizer and watch the agent's activity in real time."
++          eyebrow="Visualize"
++          accent="var(--color-info)"
++          stat="Browser view"
++        />
++        <HubCard
++          to="/gateway"
++          title="Messaging Gateway"
++          description="Configure Telegram, Discord, Slack, WhatsApp, Signal, and Email with saveable credentials."
++          eyebrow="Connect"
++          accent="var(--color-success)"
++          stat={`${connectedCount} connected`}
++        />
++        <HubCard
++          to="/sessions"
++          title="Sessions"
++          description="Browse recent conversations, inspect transcripts, and export message history."
++          eyebrow="History"
++          accent="var(--color-info)"
++          stat={`${stats?.total_sessions ?? 0} sessions`}
++        />
++        <HubCard
++          to="/skills"
++          title="Skills"
++          description="Review bundled and custom skills, including the Fr33d0m additions."
++          eyebrow="Capability"
++          accent="var(--color-primary)"
++          stat={`${skillCount} skills`}
++        />
++        <HubCard
++          to="/cron"
++          title="Automation"
++          description="Manage cron jobs and recurring prompts that run through the gateway."
++          eyebrow="Schedule"
++          accent="var(--color-warning)"
++          stat={`${cronEnabled} enabled`}
++        />
++      </div>
++
+       <div className="rounded-lg border p-4 flex-shrink-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+-        <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--color-text-muted)' }}>Platforms & Services</h3>
++        <div className="flex items-center justify-between gap-3">
++          <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--color-text-muted)' }}>Platforms & Services</h3>
++          <Link to="/gateway" className="text-xs no-underline" style={{ color: 'var(--color-primary)' }}>
++            Open gateway
++          </Link>
++        </div>
+         <div className="flex flex-wrap gap-2">
+           {gatewayPlatforms.map((p) => (
+             <ServiceBadge key={p.name} name={p.name} active={p.connected} />
+@@ -77,9 +151,7 @@ export function Dashboard() {
+         </div>
+       </div>
+ 
+-      {/* Activity Feed + Model Distribution side by side */}
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:flex-1 md:min-h-0">
+-        {/* Activity Feed — 2/3 width */}
+         <div className="lg:col-span-2 rounded-lg border p-4 flex flex-col md:min-h-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+           <div className="flex items-center justify-between mb-3">
+             <h3 className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>Activity Feed</h3>
+@@ -127,7 +199,6 @@ export function Dashboard() {
+           </div>
+         </div>
+ 
+-        {/* Model Distribution — 1/3 width */}
+         <div className="rounded-lg border p-4 flex flex-col md:min-h-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+           <h3 className="text-sm font-medium mb-3 flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>Sessions by Model</h3>
+           <div className="space-y-2 max-h-64 md:max-h-none md:flex-1 overflow-y-auto md:min-h-0">
+@@ -148,6 +219,51 @@ export function Dashboard() {
+   )
+ }
+ 
++function HubCard({
++  to,
++  title,
++  description,
++  eyebrow,
++  accent,
++  stat,
++}: {
++  to: string
++  title: string
++  description: string
++  eyebrow: string
++  accent: string
++  stat: string
++}) {
++  return (
++    <Link to={to} className="no-underline">
++      <div
++        className="rounded-xl border p-5 h-full transition-transform hover:-translate-y-0.5"
++        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++      >
++        <div className="text-[11px] uppercase tracking-[0.18em] mb-3" style={{ color: accent }}>
++          {eyebrow}
++        </div>
++        <div className="flex items-start justify-between gap-4">
++          <div>
++            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--color-text)' }}>
++              {title}
++            </h3>
++            <p className="text-sm leading-6" style={{ color: 'var(--color-text-muted)' }}>
++              {description}
++            </p>
++          </div>
++          <div
++            className="rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap"
++            style={{ backgroundColor: 'var(--color-bg)', color: accent }}
++          >
++            {stat}
++          </div>
++        </div>
++      </div>
++    </Link>
++  )
++}
++
+ function StatCard({ label, value, color }: { label: string; value: string | number; color?: string }) {
+   return (
+     <div className="rounded-lg border p-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+diff --git a/frontend/src/pages/Gateway.tsx b/frontend/src/pages/Gateway.tsx
+new file mode 100644
+index 0000000..b0a5995
+--- /dev/null
++++ b/frontend/src/pages/Gateway.tsx
+@@ -0,0 +1,475 @@
++import { useEffect, useMemo, useState, type ReactNode } from 'react'
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
++import { api } from '../api/client'
++import type { GatewayField, GatewayPlatformConfig } from '../api/types'
++
++type Drafts = Record<string, Record<string, string>>
++type Notice = { tone: 'success' | 'error' | 'info'; text: string }
++
++function toneColor(tone: Notice['tone']): string {
++  if (tone === 'success') return 'var(--color-success)'
++  if (tone === 'error') return 'var(--color-error)'
++  return 'var(--color-info)'
++}
++
++export function Gateway() {
++  const queryClient = useQueryClient()
++  const { data, isLoading, error } = useQuery({
++    queryKey: ['gateway-config'],
++    queryFn: api.gatewayConfig,
++  })
++  const { data: gatewayStatus } = useQuery({
++    queryKey: ['gateway-status'],
++    queryFn: api.gatewayStatus,
++    refetchInterval: 5000,
++  })
++
++  const [drafts, setDrafts] = useState<Drafts>({})
++  const [globalDraft, setGlobalDraft] = useState({
++    gateway_allow_all_users: 'false',
++    unauthorized_dm_behavior: 'pair',
++  })
++  const [notices, setNotices] = useState<Record<string, Notice>>({})
++
++  useEffect(() => {
++    if (!data) return
++    setDrafts((current) => {
++      if (Object.keys(current).length > 0) return current
++      return Object.fromEntries(
++        data.platforms.map((platform) => [
++          platform.key,
++          Object.fromEntries(platform.fields.map((field) => [field.key, field.value || ''])),
++        ]),
++      )
++    })
++    setGlobalDraft({
++      gateway_allow_all_users: data.gateway_allow_all_users ? 'true' : 'false',
++      unauthorized_dm_behavior: data.unauthorized_dm_behavior || 'pair',
++    })
++  }, [data])
++
++  const savePlatform = useMutation({
++    mutationFn: ({ platform, fields }: { platform: string; fields: Record<string, string> }) =>
++      api.patchGatewayConfig(platform, { fields }),
++    onSuccess: (result) => {
++      setNotices((current) => ({
++        ...current,
++        [result.platform]: {
++          tone: 'success',
++          text: result.updated_fields.length
++            ? 'Saved. Restart the gateway if it is already running.'
++            : 'No changes were needed.',
++        },
++      }))
++      queryClient.invalidateQueries({ queryKey: ['gateway-config'] })
++      queryClient.invalidateQueries({ queryKey: ['gateway-status'] })
++    },
++    onError: (err, variables) => {
++      setNotices((current) => ({
++        ...current,
++        [variables.platform]: { tone: 'error', text: err instanceof Error ? err.message : 'Failed to save platform' },
++      }))
++    },
++  })
++
++  const saveGlobal = useMutation({
++    mutationFn: () =>
++      api.patchGatewayConfig('global', {
++        fields: { GATEWAY_ALLOW_ALL_USERS: globalDraft.gateway_allow_all_users },
++        config: { unauthorized_dm_behavior: globalDraft.unauthorized_dm_behavior },
++      }),
++    onSuccess: () => {
++      setNotices((current) => ({
++        ...current,
++        global: {
++          tone: 'success',
++          text: 'Global gateway defaults saved. Restart the gateway to apply policy changes.',
++        },
++      }))
++      queryClient.invalidateQueries({ queryKey: ['gateway-config'] })
++    },
++    onError: (err) => {
++      setNotices((current) => ({
++        ...current,
++        global: { tone: 'error', text: err instanceof Error ? err.message : 'Failed to save global settings' },
++      }))
++    },
++  })
++
++  const testPlatform = useMutation({
++    mutationFn: (platform: string) => api.testGatewayPlatform(platform),
++    onSuccess: (result) => {
++      setNotices((current) => ({
++        ...current,
++        [result.platform]: {
++          tone: result.success ? 'success' : 'info',
++          text: result.missing_fields.length
++            ? `${result.message}: ${result.missing_fields.join(', ')}`
++            : result.message,
++        },
++      }))
++    },
++    onError: (err, platform) => {
++      setNotices((current) => ({
++        ...current,
++        [platform]: { tone: 'error', text: err instanceof Error ? err.message : 'Test failed' },
++      }))
++    },
++  })
++
++  const configuredCount = useMemo(
++    () => data?.platforms.filter((platform) => platform.configured).length ?? 0,
++    [data],
++  )
++
++  if (isLoading) return <div className="p-6">Loading gateway configuration...</div>
++  if (error || !data) return <div className="p-6" style={{ color: 'var(--color-error)' }}>Failed to load gateway configuration</div>
++
++  return (
++    <div className="p-6 space-y-6">
++      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
++        <div>
++          <h2 className="text-2xl font-semibold">Messaging Gateways</h2>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Configure trusted messaging channels, save credentials, and use pairing without leaving the dashboard.
++          </p>
++        </div>
++        <div className="flex flex-wrap gap-2">
++          <InlineStat label="Configured" value={`${configuredCount}/${data.platforms.length}`} />
++          <InlineStat label="Gateway" value={gatewayStatus?.running ? 'Running' : 'Stopped'} tone={gatewayStatus?.running ? 'success' : 'error'} />
++        </div>
++      </div>
++
++      <div
++        className="rounded-xl border p-5 space-y-4"
++        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++      >
++        <div className="flex flex-col gap-1">
++          <h3 className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-primary)' }}>
++            Security Defaults
++          </h3>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Hermes denies everyone by default. Use allowlists for trusted users, or keep pairing enabled so new users must request approval first.
++          </p>
++        </div>
++
++        <div className="grid gap-4 md:grid-cols-2">
++          <LabeledField label="Allow all users">
++            <select
++              value={globalDraft.gateway_allow_all_users}
++              onChange={(e) => setGlobalDraft((current) => ({ ...current, gateway_allow_all_users: e.target.value }))}
++              className="w-full rounded-lg border px-3 py-2 text-sm"
++              style={{
++                borderColor: 'var(--color-border)',
++                backgroundColor: 'var(--color-bg)',
++                color: 'var(--color-text)',
++              }}
++            >
++              <option value="false">false</option>
++              <option value="true">true</option>
++            </select>
++          </LabeledField>
++
++          <LabeledField label="Unauthorized DM behavior">
++            <select
++              value={globalDraft.unauthorized_dm_behavior}
++              onChange={(e) => setGlobalDraft((current) => ({ ...current, unauthorized_dm_behavior: e.target.value }))}
++              className="w-full rounded-lg border px-3 py-2 text-sm"
++              style={{
++                borderColor: 'var(--color-border)',
++                backgroundColor: 'var(--color-bg)',
++                color: 'var(--color-text)',
++              }}
++            >
++              <option value="pair">pair</option>
++              <option value="ignore">ignore</option>
++            </select>
++          </LabeledField>
++        </div>
++
++        <div className="flex flex-wrap items-center gap-3">
++          <button
++            onClick={() => saveGlobal.mutate()}
++            className="rounded-lg px-4 py-2 text-sm font-medium text-white"
++            style={{ backgroundColor: 'var(--color-primary)' }}
++            disabled={saveGlobal.isPending}
++          >
++            {saveGlobal.isPending ? 'Saving...' : 'Save security defaults'}
++          </button>
++          {notices.global && <NoticeText notice={notices.global} />}
++        </div>
++      </div>
++
++      <div className="grid gap-4 xl:grid-cols-2">
++        {data.platforms.map((platform) => (
++          <GatewayCard
++            key={platform.key}
++            platform={platform}
++            draft={drafts[platform.key] || {}}
++            notice={notices[platform.key]}
++            saving={savePlatform.isPending && savePlatform.variables?.platform === platform.key}
++            testing={testPlatform.isPending && testPlatform.variables === platform.key}
++            onChange={(fieldKey, value) =>
++              setDrafts((current) => ({
++                ...current,
++                [platform.key]: {
++                  ...(current[platform.key] || {}),
++                  [fieldKey]: value,
++                },
++              }))
++            }
++            onSave={() => savePlatform.mutate({ platform: platform.key, fields: drafts[platform.key] || {} })}
++            onTest={() => testPlatform.mutate(platform.key)}
++          />
++        ))}
++      </div>
++
++      <div
++        className="rounded-xl border p-5"
++        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++      >
++        <h3 className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--color-primary)' }}>
++          Pairing Commands
++        </h3>
++        <div className="grid gap-2 md:grid-cols-2">
++          <CommandHint command="fr33d0m pairing list" description="See pending and approved pairing requests." />
++          <CommandHint command="fr33d0m pairing approve telegram CODE" description="Approve a pairing code from Telegram, Signal, Email, or Discord." />
++          <CommandHint command="fr33d0m gateway restart" description="Restart the gateway after saving credentials." />
++          <CommandHint command="fr33d0m whatsapp" description="Launch the WhatsApp pairing flow and scan the QR code." />
++        </div>
++      </div>
++    </div>
++  )
++}
++
++function GatewayCard({
++  platform,
++  draft,
++  notice,
++  saving,
++  testing,
++  onChange,
++  onSave,
++  onTest,
++}: {
++  platform: GatewayPlatformConfig
++  draft: Record<string, string>
++  notice?: Notice
++  saving: boolean
++  testing: boolean
++  onChange: (fieldKey: string, value: string) => void
++  onSave: () => void
++  onTest: () => void
++}) {
++  return (
++    <div
++      className="rounded-xl border p-5 flex flex-col gap-4"
++      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
++    >
++      <div className="flex items-start justify-between gap-4">
++        <div>
++          <div className="flex items-center gap-3">
++            <span className="text-2xl">{platform.emoji}</span>
++            <div>
++              <h3 className="text-lg font-semibold">{platform.label}</h3>
++              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++                {platform.description}
++              </p>
++            </div>
++          </div>
++        </div>
++        <div className="flex flex-col items-end gap-2">
++          <StatusBadge configured={platform.configured} status={platform.status} />
++          {platform.docs_url && (
++            <a
++              href={platform.docs_url}
++              target="_blank"
++              rel="noreferrer"
++              className="text-xs no-underline"
++              style={{ color: 'var(--color-info)' }}
++            >
++              Setup guide
++            </a>
++          )}
++        </div>
++      </div>
++
++      <div className="grid gap-4 md:grid-cols-2">
++        {platform.fields.map((field) => (
++          <PlatformField
++            key={field.key}
++            field={field}
++            value={draft[field.key] ?? ''}
++            onChange={(value) => onChange(field.key, value)}
++          />
++        ))}
++      </div>
++
++      {platform.pairing_hint && (
++        <div
++          className="rounded-lg px-3 py-2 text-sm"
++          style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}
++        >
++          {platform.pairing_hint}
++        </div>
++      )}
++
++      <div className="flex flex-wrap items-center gap-3">
++        <button
++          onClick={onSave}
++          className="rounded-lg px-4 py-2 text-sm font-medium text-white"
++          style={{ backgroundColor: 'var(--color-primary)' }}
++          disabled={saving}
++        >
++          {saving ? 'Saving...' : 'Save platform'}
++        </button>
++        <button
++          onClick={onTest}
++          className="rounded-lg px-4 py-2 text-sm font-medium"
++          style={{
++            backgroundColor: 'var(--color-bg)',
++            color: 'var(--color-text)',
++            border: '1px solid var(--color-border)',
++          }}
++          disabled={testing}
++        >
++          {testing ? 'Checking...' : 'Test setup'}
++        </button>
++        {notice && <NoticeText notice={notice} />}
++      </div>
++    </div>
++  )
++}
++
++function PlatformField({
++  field,
++  value,
++  onChange,
++}: {
++  field: GatewayField
++  value: string
++  onChange: (value: string) => void
++}) {
++  const inputStyles = {
++    borderColor: 'var(--color-border)',
++    backgroundColor: 'var(--color-bg)',
++    color: 'var(--color-text)',
++  } as const
++
++  return (
++    <LabeledField
++      label={field.required ? `${field.label} *` : field.label}
++      hint={field.help}
++      badge={field.sensitive && field.configured ? 'configured' : undefined}
++    >
++      {field.input_type === 'select' ? (
++        <select
++          value={value || field.options[0] || ''}
++          onChange={(e) => onChange(e.target.value)}
++          className="w-full rounded-lg border px-3 py-2 text-sm"
++          style={inputStyles}
++        >
++          {field.options.map((option) => (
++            <option key={option} value={option}>
++              {option}
++            </option>
++          ))}
++        </select>
++      ) : (
++        <input
++          type={field.input_type}
++          value={value}
++          onChange={(e) => onChange(e.target.value)}
++          placeholder={field.placeholder || field.help}
++          className="w-full rounded-lg border px-3 py-2 text-sm"
++          style={inputStyles}
++        />
++      )}
++    </LabeledField>
++  )
++}
++
++function LabeledField({
++  label,
++  hint,
++  badge,
++  children,
++}: {
++  label: string
++  hint?: string
++  badge?: string
++  children: ReactNode
++}) {
++  return (
++    <label className="flex flex-col gap-1.5">
++      <span className="text-sm font-medium flex items-center gap-2">
++        {label}
++        {badge && (
++          <span
++            className="rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide"
++            style={{ backgroundColor: 'rgba(43,253,28,0.12)', color: 'var(--color-success)' }}
++          >
++            {badge}
++          </span>
++        )}
++      </span>
++      {children}
++      {hint && (
++        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
++          {hint}
++        </span>
++      )}
++    </label>
++  )
++}
++
++function StatusBadge({ configured, status }: { configured: boolean; status: string }) {
++  return (
++    <span
++      className="rounded-full px-2.5 py-1 text-xs font-medium"
++      style={{
++        backgroundColor: configured ? 'rgba(43,253,28,0.12)' : 'rgba(142,163,255,0.12)',
++        color: configured ? 'var(--color-success)' : 'var(--color-info)',
++      }}
++    >
++      {status}
++    </span>
++  )
++}
++
++function InlineStat({ label, value, tone }: { label: string; value: string; tone?: 'success' | 'error' }) {
++  return (
++    <div
++      className="rounded-lg px-3 py-2 text-sm"
++      style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
++    >
++      <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
++        {label}
++      </div>
++      <div style={{ color: tone === 'success' ? 'var(--color-success)' : tone === 'error' ? 'var(--color-error)' : 'var(--color-text)' }}>
++        {value}
++      </div>
++    </div>
++  )
++}
++
++function CommandHint({ command, description }: { command: string; description: string }) {
++  return (
++    <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--color-bg)' }}>
++      <div className="font-mono text-xs mb-1" style={{ color: 'var(--color-primary)' }}>
++        {command}
++      </div>
++      <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
++        {description}
++      </div>
++    </div>
++  )
++}
++
++function NoticeText({ notice }: { notice: Notice }) {
++  return (
++    <span className="text-sm" style={{ color: toneColor(notice.tone) }}>
++      {notice.text}
++    </span>
++  )
++}
+diff --git a/frontend/src/pages/Neurovision.tsx b/frontend/src/pages/Neurovision.tsx
+new file mode 100644
+index 0000000..b7a0871
+--- /dev/null
++++ b/frontend/src/pages/Neurovision.tsx
+@@ -0,0 +1,34 @@
++export function Neurovision() {
++  return (
++    <div className="p-6 space-y-4 h-full flex flex-col">
++      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
++        <div>
++          <h2 className="text-2xl font-semibold">Neurovision</h2>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Browser view of the terminal visualizer. It runs through a web terminal so you can watch the live curses interface without SSH.
++          </p>
++        </div>
++        <a
++          href="/neurovision/"
++          target="_blank"
++          rel="noreferrer"
++          className="text-sm no-underline"
++          style={{ color: 'var(--color-primary)' }}
++        >
++          Open in new tab
++        </a>
++      </div>
++
++      <div
++        className="rounded-xl border overflow-hidden flex-1 min-h-[70vh]"
++        style={{ borderColor: 'var(--color-border)', backgroundColor: '#020406' }}
++      >
++        <iframe
++          title="Fr33d0m Neurovision"
++          src="/neurovision/"
++          className="w-full h-full border-0"
++        />
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/pages/Terminal.tsx b/frontend/src/pages/Terminal.tsx
+new file mode 100644
+index 0000000..f1a5c79
+--- /dev/null
++++ b/frontend/src/pages/Terminal.tsx
+@@ -0,0 +1,34 @@
++export function Terminal() {
++  return (
++    <div className="p-6 space-y-4 h-full flex flex-col">
++      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
++        <div>
++          <h2 className="text-2xl font-semibold">Fr33d0m Terminal</h2>
++          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
++            Live browser terminal for the Fr33d0m CLI. Use this for chat, gateway restarts, pairing, and setup commands.
++          </p>
++        </div>
++        <a
++          href="/terminal/"
++          target="_blank"
++          rel="noreferrer"
++          className="text-sm no-underline"
++          style={{ color: 'var(--color-primary)' }}
++        >
++          Open in new tab
++        </a>
++      </div>
++
++      <div
++        className="rounded-xl border overflow-hidden flex-1 min-h-[70vh]"
++        style={{ borderColor: 'var(--color-border)', backgroundColor: '#05080d' }}
++      >
++        <iframe
++          title="Fr33d0m Terminal"
++          src="/terminal/"
++          className="w-full h-full border-0"
++        />
++      </div>
++    </div>
++  )
++}
+diff --git a/pyproject.toml b/pyproject.toml
+index cef9088..7790daa 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -10,6 +10,7 @@ requires-python = ">=3.11"
+ license = { text = "MIT" }
+ dependencies = [
+     "fastapi>=0.115.0",
++    "httpx>=0.27.0",
+     "uvicorn[standard]>=0.32.0",
+     "pydantic>=2.0",
+     "pyyaml",
+diff --git a/webui/auth.py b/webui/auth.py
+index e1a538d..07fc8a3 100644
+--- a/webui/auth.py
++++ b/webui/auth.py
+@@ -1,6 +1,6 @@
+ """Authentication middleware for the WebUI API."""
+ 
+-from fastapi import Depends, HTTPException, Request, WebSocket, status
++from fastapi import Cookie, Depends, HTTPException, Request, WebSocket, status
+ from fastapi.security import APIKeyHeader
+ 
+ from webui.config import get_webui_config
+@@ -15,19 +15,23 @@ def _get_expected_token() -> str:
+ 
+ 
+ async def require_auth(
++    request: Request,
+     api_key: str = Depends(_api_key_header),
++    cookie_token: str | None = Cookie(default=None, alias="fr33d0m_webui_token"),
+ ) -> str:
+     """Dependency that validates the auth token for HTTP endpoints."""
+     expected = _get_expected_token()
+-    if not api_key or api_key != expected:
++    supplied = api_key or cookie_token or request.cookies.get("hermes_webui_token")
++    if not supplied or supplied != expected:
+         raise HTTPException(
+             status_code=status.HTTP_401_UNAUTHORIZED,
+             detail="Invalid or missing authentication token",
+         )
+-    return api_key
++    return supplied
+ 
+ 
+-async def validate_ws_token(websocket: WebSocket, token: str) -> bool:
+-    """Validate a token received via WebSocket message."""
++async def validate_ws_token(websocket: WebSocket, token: str | None = None) -> bool:
++    """Validate a token received via WebSocket message or cookie."""
+     expected = _get_expected_token()
+-    return token == expected
++    supplied = token or websocket.cookies.get("fr33d0m_webui_token") or websocket.cookies.get("hermes_webui_token")
++    return bool(supplied and supplied == expected)
+diff --git a/webui/routers/gateway_config.py b/webui/routers/gateway_config.py
+new file mode 100644
+index 0000000..06d9268
+--- /dev/null
++++ b/webui/routers/gateway_config.py
+@@ -0,0 +1,351 @@
++"""Gateway configuration endpoints."""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Any
++
++import httpx
++from fastapi import APIRouter, Depends, HTTPException
++
++from webui.auth import require_auth
++from webui.hermes_bridge import HERMES_HOME, get_env_path, read_config_yaml, write_config_yaml_value
++from webui.schemas.gateway_config import (
++    GatewayConfigPatchResponse,
++    GatewayConfigResponse,
++    GatewayField,
++    GatewayPlatformConfig,
++    GatewayPlatformPatchRequest,
++    GatewayTestResponse,
++)
++
++router = APIRouter(prefix="/api/gateway", tags=["gateway"], dependencies=[Depends(require_auth)])
++
++_DOCS_BASE = "https://hermes-agent.nousresearch.com/docs/user-guide/messaging"
++
++_PLATFORM_SPECS: list[dict[str, Any]] = [
++    {
++        "key": "telegram",
++        "label": "Telegram",
++        "emoji": "📱",
++        "description": "BotFather token, allowed users, and optional home chat for cron delivery.",
++        "docs_url": f"{_DOCS_BASE}/telegram",
++        "fields": [
++            {"key": "TELEGRAM_BOT_TOKEN", "label": "Bot token", "help": "Telegram bot token from @BotFather.", "sensitive": True, "required": True},
++            {"key": "TELEGRAM_ALLOWED_USERS", "label": "Allowed user IDs", "help": "Comma-separated Telegram user IDs.", "required": False},
++            {"key": "TELEGRAM_HOME_CHANNEL", "label": "Home channel", "help": "Chat ID for cron delivery (optional).", "required": False},
++        ],
++    },
++    {
++        "key": "discord",
++        "label": "Discord",
++        "emoji": "💬",
++        "description": "Discord bot token, trusted user IDs, and optional home channel.",
++        "docs_url": f"{_DOCS_BASE}/discord",
++        "fields": [
++            {"key": "DISCORD_BOT_TOKEN", "label": "Bot token", "help": "Discord bot token from the Developer Portal.", "sensitive": True, "required": True},
++            {"key": "DISCORD_ALLOWED_USERS", "label": "Allowed user IDs", "help": "Comma-separated Discord member IDs.", "required": False},
++            {"key": "DISCORD_HOME_CHANNEL", "label": "Home channel", "help": "Channel ID for cron delivery (optional).", "required": False},
++            {"key": "DISCORD_REQUIRE_MENTION", "label": "Require mention", "help": "Set false to allow free-response channels.", "required": False},
++            {"key": "DISCORD_FREE_RESPONSE_CHANNELS", "label": "Free-response channels", "help": "Comma-separated channel IDs where @mention is not required.", "required": False},
++        ],
++    },
++    {
++        "key": "slack",
++        "label": "Slack",
++        "emoji": "💼",
++        "description": "Socket Mode tokens plus allowed users and optional home channel.",
++        "docs_url": f"{_DOCS_BASE}/slack",
++        "fields": [
++            {"key": "SLACK_BOT_TOKEN", "label": "Bot token", "help": "Slack bot token (xoxb-...).", "sensitive": True, "required": True},
++            {"key": "SLACK_APP_TOKEN", "label": "App token", "help": "Slack app-level token (xapp-...).", "sensitive": True, "required": True},
++            {"key": "SLACK_ALLOWED_USERS", "label": "Allowed user IDs", "help": "Comma-separated Slack member IDs.", "required": False},
++            {"key": "SLACK_HOME_CHANNEL", "label": "Home channel", "help": "Channel ID for cron delivery (optional).", "required": False},
++        ],
++    },
++    {
++        "key": "whatsapp",
++        "label": "WhatsApp",
++        "emoji": "📲",
++        "description": "Enable the bridge, choose the mode, and point users to the pairing flow.",
++        "docs_url": f"{_DOCS_BASE}/whatsapp",
++        "fields": [
++            {
++                "key": "WHATSAPP_ENABLED",
++                "label": "Bridge enabled",
++                "help": "Set true to enable the WhatsApp bridge.",
++                "required": False,
++                "input_type": "select",
++                "options": ["false", "true"],
++            },
++            {
++                "key": "WHATSAPP_MODE",
++                "label": "Mode",
++                "help": "bot = separate number, self-chat = talk to yourself.",
++                "required": False,
++                "input_type": "select",
++                "options": ["bot", "self-chat"],
++            },
++            {"key": "WHATSAPP_ALLOWED_USERS", "label": "Allowed users", "help": "Comma-separated phone numbers with country code and no +.", "required": False},
++        ],
++        "pairing_hint": "Run `fr33d0m whatsapp` or use the Terminal page to scan the QR code after saving.",
++    },
++    {
++        "key": "signal",
++        "label": "Signal",
++        "emoji": "📡",
++        "description": "Connect to signal-cli in HTTP mode and define allowed contacts.",
++        "docs_url": f"{_DOCS_BASE}/signal",
++        "fields": [
++            {"key": "SIGNAL_HTTP_URL", "label": "signal-cli URL", "help": "signal-cli daemon HTTP endpoint, e.g. http://127.0.0.1:8080.", "required": True},
++            {"key": "SIGNAL_ACCOUNT", "label": "Account number", "help": "Signal bot phone number in E.164 format.", "required": True},
++            {"key": "SIGNAL_ALLOWED_USERS", "label": "Allowed users", "help": "Comma-separated E.164 numbers or UUIDs.", "required": False},
++            {"key": "SIGNAL_GROUP_ALLOWED_USERS", "label": "Allowed groups", "help": "Comma-separated group IDs or * for all groups.", "required": False},
++            {"key": "SIGNAL_HOME_CHANNEL", "label": "Home channel", "help": "Default delivery target for cron jobs.", "required": False},
++        ],
++    },
++    {
++        "key": "email",
++        "label": "Email",
++        "emoji": "📧",
++        "description": "Dedicated mailbox credentials plus IMAP/SMTP hosts and allowlist.",
++        "docs_url": f"{_DOCS_BASE}/email",
++        "fields": [
++            {"key": "EMAIL_ADDRESS", "label": "Email address", "help": "Mailbox address used by the bot.", "required": True},
++            {"key": "EMAIL_PASSWORD", "label": "App password", "help": "Mailbox password or app password.", "sensitive": True, "required": True},
++            {"key": "EMAIL_IMAP_HOST", "label": "IMAP host", "help": "IMAP hostname, e.g. imap.gmail.com.", "required": True},
++            {"key": "EMAIL_IMAP_PORT", "label": "IMAP port", "help": "Defaults to 993.", "required": False},
++            {"key": "EMAIL_SMTP_HOST", "label": "SMTP host", "help": "SMTP hostname, e.g. smtp.gmail.com.", "required": True},
++            {"key": "EMAIL_SMTP_PORT", "label": "SMTP port", "help": "Defaults to 587.", "required": False},
++            {"key": "EMAIL_ALLOWED_USERS", "label": "Allowed senders", "help": "Comma-separated sender email addresses.", "required": False},
++            {"key": "EMAIL_HOME_ADDRESS", "label": "Home address", "help": "Default delivery address for cron jobs.", "required": False},
++        ],
++    },
++]
++
++_PLATFORMS_BY_KEY = {platform["key"]: platform for platform in _PLATFORM_SPECS}
++
++
++def _read_env_values() -> dict[str, str]:
++    env_path = get_env_path()
++    if not env_path.exists():
++        return {}
++
++    values: dict[str, str] = {}
++    for line in env_path.read_text(encoding="utf-8").splitlines():
++        line = line.strip()
++        if not line or line.startswith("#") or "=" not in line:
++            continue
++        key, _, value = line.partition("=")
++        values[key.strip()] = value.strip().strip('"').strip("'")
++    return values
++
++
++def _set_env_value(key: str, value: str) -> None:
++    env_path = get_env_path()
++    env_path.parent.mkdir(parents=True, exist_ok=True)
++    if not env_path.exists():
++        env_path.write_text("", encoding="utf-8")
++
++    from dotenv import set_key
++
++    set_key(str(env_path), key, value)
++
++
++def _is_platform_configured(platform_key: str, env_values: dict[str, str]) -> tuple[bool, str]:
++    if platform_key == "telegram":
++        configured = bool(env_values.get("TELEGRAM_BOT_TOKEN"))
++        return configured, "configured" if configured else "not configured"
++
++    if platform_key == "discord":
++        configured = bool(env_values.get("DISCORD_BOT_TOKEN"))
++        return configured, "configured" if configured else "not configured"
++
++    if platform_key == "slack":
++        configured = bool(env_values.get("SLACK_BOT_TOKEN") and env_values.get("SLACK_APP_TOKEN"))
++        return configured, "configured" if configured else "partially configured" if env_values.get("SLACK_BOT_TOKEN") or env_values.get("SLACK_APP_TOKEN") else "not configured"
++
++    if platform_key == "whatsapp":
++        enabled = env_values.get("WHATSAPP_ENABLED", "").lower() == "true"
++        session_file = HERMES_HOME / "whatsapp" / "session" / "creds.json"
++        if enabled and session_file.exists():
++            return True, "configured + paired"
++        if enabled:
++            return False, "enabled, waiting for QR pairing"
++        return False, "not configured"
++
++    if platform_key == "signal":
++        configured = bool(env_values.get("SIGNAL_HTTP_URL") and env_values.get("SIGNAL_ACCOUNT"))
++        return configured, "configured" if configured else "partially configured" if env_values.get("SIGNAL_HTTP_URL") or env_values.get("SIGNAL_ACCOUNT") else "not configured"
++
++    if platform_key == "email":
++        parts = [
++            env_values.get("EMAIL_ADDRESS"),
++            env_values.get("EMAIL_PASSWORD"),
++            env_values.get("EMAIL_IMAP_HOST"),
++            env_values.get("EMAIL_SMTP_HOST"),
++        ]
++        configured = all(parts)
++        return configured, "configured" if configured else "partially configured" if any(parts) else "not configured"
++
++    return False, "not configured"
++
++
++def _build_platform_response(platform: dict[str, Any], env_values: dict[str, str]) -> GatewayPlatformConfig:
++    configured, status = _is_platform_configured(platform["key"], env_values)
++    fields = []
++
++    for field in platform["fields"]:
++        raw_value = env_values.get(field["key"], "")
++        is_sensitive = bool(field.get("sensitive"))
++        fields.append(GatewayField(
++            key=field["key"],
++            label=field["label"],
++            value="" if is_sensitive else raw_value,
++            help=field.get("help", ""),
++            placeholder="Configured - leave blank to keep current value" if is_sensitive and raw_value else "",
++            input_type=field.get("input_type", "password" if is_sensitive else "text"),
++            configured=bool(raw_value),
++            sensitive=is_sensitive,
++            required=bool(field.get("required")),
++            options=field.get("options", []),
++        ))
++
++    return GatewayPlatformConfig(
++        key=platform["key"],
++        label=platform["label"],
++        emoji=platform.get("emoji", ""),
++        docs_url=platform.get("docs_url"),
++        configured=configured,
++        status=status,
++        description=platform.get("description", ""),
++        pairing_hint=platform.get("pairing_hint"),
++        fields=fields,
++    )
++
++
++def _missing_required_fields(platform: dict[str, Any], env_values: dict[str, str]) -> list[str]:
++    missing = []
++    for field in platform["fields"]:
++        if field.get("required") and not env_values.get(field["key"]):
++            missing.append(field["label"])
++    return missing
++
++
++@router.get("/config", response_model=GatewayConfigResponse)
++async def gateway_config() -> GatewayConfigResponse:
++    """Return structured gateway configuration for the dashboard."""
++    env_values = _read_env_values()
++    config = read_config_yaml()
++
++    platforms = [_build_platform_response(platform, env_values) for platform in _PLATFORM_SPECS]
++
++    return GatewayConfigResponse(
++        gateway_allow_all_users=env_values.get("GATEWAY_ALLOW_ALL_USERS", "").lower() == "true",
++        unauthorized_dm_behavior=str(config.get("unauthorized_dm_behavior", "pair")),
++        platforms=platforms,
++    )
++
++
++@router.patch("/config/{platform}", response_model=GatewayConfigPatchResponse)
++async def patch_gateway_config(platform: str, req: GatewayPlatformPatchRequest) -> GatewayConfigPatchResponse:
++    """Update a platform configuration."""
++    updated_fields: list[str] = []
++    updated_config: list[str] = []
++
++    if platform == "global":
++        for key, value in req.fields.items():
++            if key != "GATEWAY_ALLOW_ALL_USERS":
++                continue
++            normalized = "true" if str(value).lower() == "true" else "false"
++            _set_env_value(key, normalized)
++            updated_fields.append(key)
++
++        for key, value in req.config.items():
++            if key != "unauthorized_dm_behavior":
++                continue
++            write_config_yaml_value(key, value)
++            updated_config.append(key)
++
++        return GatewayConfigPatchResponse(
++            success=True,
++            platform=platform,
++            updated_fields=updated_fields,
++            updated_config=updated_config,
++        )
++
++    spec = _PLATFORMS_BY_KEY.get(platform)
++    if not spec:
++        raise HTTPException(status_code=404, detail="Unknown gateway platform")
++
++    spec_field_keys = {field["key"] for field in spec["fields"]}
++    current_env = _read_env_values()
++
++    for key, value in req.fields.items():
++        if key not in spec_field_keys:
++            continue
++        rendered = str(value or "").strip()
++        field_spec = next((field for field in spec["fields"] if field["key"] == key), None)
++        if not field_spec:
++            continue
++        if field_spec.get("sensitive") and not rendered:
++            continue
++        _set_env_value(key, rendered)
++        updated_fields.append(key)
++
++    for key, value in req.config.items():
++        write_config_yaml_value(key, value)
++        updated_config.append(key)
++
++    if platform == "whatsapp" and current_env.get("WHATSAPP_ENABLED", "").lower() != "true":
++        if str(req.fields.get("WHATSAPP_ENABLED", "")).lower() == "true":
++            updated_fields.append("WHATSAPP_PAIRING_REQUIRED")
++
++    return GatewayConfigPatchResponse(
++        success=True,
++        platform=platform,
++        updated_fields=updated_fields,
++        updated_config=updated_config,
++    )
++
++
++@router.post("/test/{platform}", response_model=GatewayTestResponse)
++async def test_gateway_platform(platform: str) -> GatewayTestResponse:
++    """Test or validate a gateway configuration."""
++    spec = _PLATFORMS_BY_KEY.get(platform)
++    if not spec:
++        raise HTTPException(status_code=404, detail="Unknown gateway platform")
++
++    env_values = _read_env_values()
++    missing_fields = _missing_required_fields(spec, env_values)
++    if missing_fields:
++        return GatewayTestResponse(
++            success=False,
++            platform=platform,
++            message="Missing required fields",
++            missing_fields=missing_fields,
++        )
++
++    if platform == "signal":
++        base_url = env_values.get("SIGNAL_HTTP_URL", "").rstrip("/")
++        if base_url:
++            try:
++                async with httpx.AsyncClient(timeout=5.0) as client:
++                    response = await client.get(f"{base_url}/api/v1/check")
++                if response.status_code == 200:
++                    return GatewayTestResponse(success=True, platform=platform, message="signal-cli responded successfully")
++                return GatewayTestResponse(success=False, platform=platform, message=f"signal-cli returned {response.status_code}")
++            except Exception as exc:  # pragma: no cover - network failure path
++                return GatewayTestResponse(success=False, platform=platform, message=f"Could not reach signal-cli: {exc}")
++
++    if platform == "whatsapp":
++        session_file = HERMES_HOME / "whatsapp" / "session" / "creds.json"
++        if session_file.exists():
++            return GatewayTestResponse(success=True, platform=platform, message="WhatsApp session is already paired")
++        return GatewayTestResponse(success=False, platform=platform, message="WhatsApp is enabled but still needs QR pairing")
++
++    return GatewayTestResponse(
++        success=True,
++        platform=platform,
++        message="Required fields are present. Restart the gateway to apply changes.",
++    )
+diff --git a/webui/schemas/gateway_config.py b/webui/schemas/gateway_config.py
+new file mode 100644
+index 0000000..1ad0d9a
+--- /dev/null
++++ b/webui/schemas/gateway_config.py
+@@ -0,0 +1,68 @@
++"""Pydantic models for gateway configuration endpoints."""
++
++from typing import Any, Literal
++
++from pydantic import BaseModel, Field
++
++
++class GatewayField(BaseModel):
++    """Editable field for a single gateway platform."""
++
++    key: str
++    label: str
++    value: str = ""
++    help: str = ""
++    placeholder: str = ""
++    input_type: Literal["text", "password", "select"] = "text"
++    configured: bool = False
++    sensitive: bool = False
++    required: bool = False
++    options: list[str] = Field(default_factory=list)
++
++
++class GatewayPlatformConfig(BaseModel):
++    """Configuration metadata and current state for a platform."""
++
++    key: str
++    label: str
++    emoji: str = ""
++    docs_url: str | None = None
++    configured: bool = False
++    status: str = "not configured"
++    description: str = ""
++    pairing_hint: str | None = None
++    fields: list[GatewayField] = Field(default_factory=list)
++
++
++class GatewayConfigResponse(BaseModel):
++    """Full gateway configuration payload for the dashboard."""
++
++    gateway_allow_all_users: bool = False
++    unauthorized_dm_behavior: str = "pair"
++    platforms: list[GatewayPlatformConfig] = Field(default_factory=list)
++
++
++class GatewayPlatformPatchRequest(BaseModel):
++    """Update request for a platform."""
++
++    fields: dict[str, Any] = Field(default_factory=dict)
++    config: dict[str, Any] = Field(default_factory=dict)
++
++
++class GatewayConfigPatchResponse(BaseModel):
++    """Response after updating a platform."""
++
++    success: bool
++    platform: str
++    updated_fields: list[str] = Field(default_factory=list)
++    updated_config: list[str] = Field(default_factory=list)
++    requires_restart: bool = True
++
++
++class GatewayTestResponse(BaseModel):
++    """Connectivity or completeness check result for a platform."""
++
++    success: bool
++    platform: str
++    message: str
++    missing_fields: list[str] = Field(default_factory=list)
+diff --git a/webui/server.py b/webui/server.py
+index e9c6003..8a53084 100644
+--- a/webui/server.py
++++ b/webui/server.py
+@@ -1,41 +1,135 @@
+-"""FastAPI application factory for Hermes WebUI."""
++"""FastAPI application factory for the Fr33d0m dashboard."""
+ 
++import asyncio
+ import json
+ import logging
+ import time
+ from contextlib import asynccontextmanager
+ from pathlib import Path
+ 
++import httpx
++import websockets
+ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+ from fastapi.middleware.cors import CORSMiddleware
+-from fastapi.responses import FileResponse
++from fastapi.responses import FileResponse, Response
+ from fastapi.staticfiles import StaticFiles
++from websockets.exceptions import ConnectionClosed
+ 
+-from webui.auth import validate_ws_token
++from fastapi import Depends
++
++from webui.auth import require_auth, validate_ws_token
+ from webui.config import get_webui_config
+ from webui.hermes_bridge import init_hermes_path
+-from webui.routers import config_editor, cron, gateway_status, health, search, sessions, skills
++from webui.routers import config_editor, cron, gateway_config, gateway_status, health, search, sessions, skills
+ from webui.websocket.hook_bridge import bridge
+ from webui.websocket.hub import hub
+ 
+ logger = logging.getLogger(__name__)
+ 
+ FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
++HOP_BY_HOP_HEADERS = {
++    "connection",
++    "keep-alive",
++    "proxy-authenticate",
++    "proxy-authorization",
++    "te",
++    "trailers",
++    "transfer-encoding",
++    "upgrade",
++}
++TTYD_TARGETS = {
++    "terminal": {"http": "http://127.0.0.1:7681", "ws": "ws://127.0.0.1:7681"},
++    "neurovision": {"http": "http://127.0.0.1:7682", "ws": "ws://127.0.0.1:7682"},
++}
++
++
++def _proxy_request_headers(request: Request) -> dict[str, str]:
++    return {
++        key: value
++        for key, value in request.headers.items()
++        if key.lower() not in HOP_BY_HOP_HEADERS | {"host", "cookie", "x-hermes-token", "content-length"}
++    }
++
++
++def _proxy_response_headers(headers: httpx.Headers) -> dict[str, str]:
++    return {
++        key: value
++        for key, value in headers.items()
++        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() != "content-length"
++    }
++
++
++async def _proxy_http(request: Request, target_key: str) -> Response:
++    target = TTYD_TARGETS[target_key]
++    url = f"{target['http']}{request.url.path}"
++    if request.url.query:
++        url = f"{url}?{request.url.query}"
++
++    async with httpx.AsyncClient(follow_redirects=False, timeout=60.0) as client:
++        upstream = await client.request(
++            request.method,
++            url,
++            content=await request.body(),
++            headers=_proxy_request_headers(request),
++        )
++
++    return Response(
++        content=upstream.content,
++        status_code=upstream.status_code,
++        headers=_proxy_response_headers(upstream.headers),
++    )
++
++
++async def _proxy_websocket(websocket: WebSocket, target_key: str) -> None:
++    if not await validate_ws_token(websocket):
++        await websocket.close(code=4401, reason="Authentication required")
++        return
++
++    await websocket.accept()
++
++    target = TTYD_TARGETS[target_key]
++    upstream_url = f"{target['ws']}{websocket.url.path}"
++    if websocket.url.query:
++        upstream_url = f"{upstream_url}?{websocket.url.query}"
++
++    async with websockets.connect(upstream_url) as upstream:
++        async def client_to_upstream() -> None:
++            while True:
++                message = await websocket.receive()
++                if message["type"] == "websocket.disconnect":
++                    break
++                if message.get("text") is not None:
++                    await upstream.send(message["text"])
++                elif message.get("bytes") is not None:
++                    await upstream.send(message["bytes"])
++
++        async def upstream_to_client() -> None:
++            while True:
++                message = await upstream.recv()
++                if isinstance(message, bytes):
++                    await websocket.send_bytes(message)
++                else:
++                    await websocket.send_text(message)
++
++        tasks = {
++            asyncio.create_task(client_to_upstream()),
++            asyncio.create_task(upstream_to_client()),
++        }
++        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
++        for task in pending:
++            task.cancel()
++        await asyncio.gather(*pending, return_exceptions=True)
++        for task in done:
++            task.result()
+ 
+ 
+ @asynccontextmanager
+ async def lifespan(app: FastAPI):
+     """Application startup and shutdown."""
+-    # Initialize hermes-agent path on startup
+     available = init_hermes_path()
+     logger.info("Hermes Agent modules: %s", "available" if available else "fallback mode")
+-
+-    # Start the polling bridge for WebSocket events
+     await bridge.start()
+-
+     yield
+-
+-    # Cleanup
+     await bridge.stop()
+ 
+ 
+@@ -44,13 +138,12 @@ def create_app() -> FastAPI:
+     config = get_webui_config()
+ 
+     app = FastAPI(
+-        title="Hermes WebUI",
+-        description="Process monitoring and configuration UI for Hermes Agent",
++        title="Fr33d0m",
++        description="Fr33d0m dashboard for your custom agent runtime",
+         version="0.1.0",
+         lifespan=lifespan,
+     )
+ 
+-    # CORS middleware
+     app.add_middleware(
+         CORSMiddleware,
+         allow_origins=config.cors_origins,
+@@ -59,27 +152,47 @@ def create_app() -> FastAPI:
+         allow_headers=["*"],
+     )
+ 
+-    # Register API routers
+     app.include_router(health.router)
+     app.include_router(sessions.router)
+     app.include_router(search.router)
+     app.include_router(gateway_status.router)
++    app.include_router(gateway_config.router)
+     app.include_router(config_editor.router)
+     app.include_router(skills.router)
+     app.include_router(cron.router)
+ 
+-    # WebSocket endpoint
++    @app.api_route("/terminal", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/terminal/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
++    async def terminal_proxy(request: Request, path: str = "", _: str = Depends(require_auth)):
++        del path
++        return await _proxy_http(request, "terminal")
++
++    @app.api_route("/neurovision", methods=["GET", "HEAD", "OPTIONS"])
++    @app.api_route("/neurovision/{path:path}", methods=["GET", "HEAD", "OPTIONS"])
++    async def neurovision_proxy(request: Request, path: str = "", _: str = Depends(require_auth)):
++        del path
++        return await _proxy_http(request, "neurovision")
++
++    @app.websocket("/terminal/ws")
++    async def terminal_websocket_proxy(websocket: WebSocket):
++        try:
++            await _proxy_websocket(websocket, "terminal")
++        except (WebSocketDisconnect, ConnectionClosed):
++            pass
++
++    @app.websocket("/neurovision/ws")
++    async def neurovision_websocket_proxy(websocket: WebSocket):
++        try:
++            await _proxy_websocket(websocket, "neurovision")
++        except (WebSocketDisconnect, ConnectionClosed):
++            pass
++
+     @app.websocket("/ws")
+     async def websocket_endpoint(websocket: WebSocket):
+-        """WebSocket endpoint for real-time events.
+-
+-        Client must send auth token as first message:
+-        {"type": "auth", "token": "..."}
+-        """
++        """WebSocket endpoint for real-time dashboard events."""
+         await hub.connect(websocket)
+ 
+         try:
+-            # Wait for auth message
+             raw = await websocket.receive_text()
+             try:
+                 msg = json.loads(raw)
+@@ -96,17 +209,14 @@ def create_app() -> FastAPI:
+                 await websocket.close(code=4003, reason="Invalid token")
+                 return
+ 
+-            # Auth successful — send confirmation
+             await websocket.send_json({
+                 "type": "auth:ok",
+                 "data": {"client_count": hub.client_count},
+                 "timestamp": time.time(),
+             })
+ 
+-            # Keep connection alive, handle incoming messages
+             while True:
+                 data = await websocket.receive_text()
+-                # Client can send ping to keep alive
+                 try:
+                     msg = json.loads(data)
+                     if msg.get("type") == "ping":
+@@ -122,19 +232,14 @@ def create_app() -> FastAPI:
+         finally:
+             await hub.disconnect(websocket)
+ 
+-    # Serve frontend static files (if built)
+     if FRONTEND_DIST.exists():
+-        # Mount static assets (JS, CSS, images)
+         app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+ 
+-        # SPA catch-all: serve index.html for any non-API, non-asset path
+         @app.get("/{path:path}")
+         async def spa_fallback(request: Request, path: str):
+-            # Serve actual files if they exist (favicon, etc.)
+             file_path = FRONTEND_DIST / path
+             if path and file_path.exists() and file_path.is_file():
+                 return FileResponse(str(file_path))
+-            # Otherwise serve index.html for SPA routing
+             return FileResponse(str(FRONTEND_DIST / "index.html"))
+ 
+     return app

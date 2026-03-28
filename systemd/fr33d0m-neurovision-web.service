@@ -1,0 +1,17 @@
+[Unit]
+Description=Fr33d0m Browser Neurovision
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+Environment=HERMES_HOME=%h/.hermes
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/ttyd -p 7682 -i lo -b /neurovision -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m-neurovision --gallery'
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

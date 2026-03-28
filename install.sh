@@ -45,6 +45,7 @@ install_system_deps() {
     command -v curl   &>/dev/null || missing+=(curl)
     command -v rg     &>/dev/null || missing+=(ripgrep)
     command -v ffmpeg &>/dev/null || missing+=(ffmpeg)
+    command -v ttyd   &>/dev/null || missing+=(ttyd)
     command -v npm    &>/dev/null || missing+=(nodejs npm)
 
     if [ ${#missing[@]} -gt 0 ]; then
@@ -136,6 +137,27 @@ for repo_url in "${EXTENSIONS[@]}"; do
     fi
 done
 
+apply_webui_patch() {
+    local patch_file="$SCRIPT_DIR/patches/hermes-webui.patch"
+    local target_dir="$HERMES_HOME/extensions/hermes-webui"
+
+    if [ ! -f "$patch_file" ] || [ ! -d "$target_dir/.git" ]; then
+        return
+    fi
+
+    info "Applying Fr33d0m dashboard patch to hermes-webui..."
+    if git -C "$target_dir" apply --check "$patch_file" 2>/dev/null; then
+        git -C "$target_dir" apply --whitespace=nowarn "$patch_file"
+        ok "Applied Fr33d0m dashboard patch"
+    elif git -C "$target_dir" apply --reverse --check "$patch_file" 2>/dev/null; then
+        ok "Fr33d0m dashboard patch already applied"
+    else
+        warn "Could not apply Fr33d0m dashboard patch automatically"
+    fi
+}
+
+apply_webui_patch
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Phase 6: Install Python packages into Hermes venv
 # ═════════════════════════════════════════════════════════════════════════════
@@ -159,19 +181,16 @@ if [ -d "$WEBUI_DIR" ]; then
     if [ ! -d "$WEBUI_DIR/venv" ]; then
         info "Setting up WebUI Python environment..."
         uv venv "$WEBUI_DIR/venv" --python 3.11 2>/dev/null
-        uv pip install -e "$WEBUI_DIR" --python "$WEBUI_DIR/venv/bin/python" 2>/dev/null
-        ok "WebUI backend installed"
+        ok "WebUI backend environment created"
     else
-        ok "WebUI backend already set up"
+        ok "WebUI backend environment already set up"
     fi
+    uv pip install -e "$WEBUI_DIR" --python "$WEBUI_DIR/venv/bin/python" 2>/dev/null
+    ok "WebUI backend installed"
     if [ -d "$WEBUI_DIR/frontend" ] && command -v npm &>/dev/null; then
-        if [ ! -d "$WEBUI_DIR/frontend/dist" ]; then
-            info "Building WebUI frontend..."
-            (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
-            ok "WebUI frontend built"
-        else
-            ok "WebUI frontend already built"
-        fi
+        info "Building WebUI frontend..."
+        (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
+        ok "WebUI frontend built"
     fi
 fi
 
@@ -219,7 +238,9 @@ install_systemd_services() {
     info "Setting up systemd services for autostart..."
 
     local SYSTEMD_DIR="$HOME/.config/systemd/user"
+    local TTYD_BIN
     mkdir -p "$SYSTEMD_DIR"
+    TTYD_BIN="$(command -v ttyd || true)"
 
     # ── fr33d0m-webui ────────────────────────────────────────────────────
     cat > "$SYSTEMD_DIR/fr33d0m-webui.service" << UNIT
@@ -260,17 +281,19 @@ RestartSec=10
 WantedBy=default.target
 UNIT
 
-    # ── fr33d0m-neurovision ──────────────────────────────────────────────
-    cat > "$SYSTEMD_DIR/fr33d0m-neurovision.service" << UNIT
+    # ── fr33d0m-terminal ─────────────────────────────────────────────────
+    if [ -n "$TTYD_BIN" ]; then
+        cat > "$SYSTEMD_DIR/fr33d0m-terminal.service" << UNIT
 [Unit]
-Description=Fr33d0m Neurovision Daemon
-After=network.target
+Description=Fr33d0m Browser Terminal
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 Environment=HERMES_HOME=$HERMES_HOME
-Environment=PYTHONPATH=$HERMES_HOME/extensions/hermes-neurovision
-ExecStart=$HERMES_HOME/hermes-agent/venv/bin/python -m hermes_neurovision.cli --daemon
+Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
+ExecStart=$TTYD_BIN -p 7681 -i lo -b /terminal -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m'
 Restart=on-failure
 RestartSec=10
 
@@ -278,12 +301,36 @@ RestartSec=10
 WantedBy=default.target
 UNIT
 
+        cat > "$SYSTEMD_DIR/fr33d0m-neurovision-web.service" << UNIT
+[Unit]
+Description=Fr33d0m Browser Neurovision
+After=network.target
+
+[Service]
+Type=simple
+Environment=HERMES_HOME=$HERMES_HOME
+Environment=PATH=$LOCAL_BIN:/usr/local/bin:/usr/bin:/bin
+ExecStart=$TTYD_BIN -p 7682 -i lo -b /neurovision -t fontSize=14 -t cursorStyle=bar bash -lc 'source "$HOME/.bashrc" >/dev/null 2>&1; fr33d0m-neurovision --gallery'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+UNIT
+    fi
+
     # Reload and enable
     systemctl --user daemon-reload
 
     systemctl --user enable fr33d0m-webui.service    2>/dev/null && ok "fr33d0m-webui    → enabled (autostart)" || warn "fr33d0m-webui enable failed"
     systemctl --user enable fr33d0m-gateway.service  2>/dev/null && ok "fr33d0m-gateway  → enabled (autostart)" || warn "fr33d0m-gateway enable failed"
-    systemctl --user enable fr33d0m-neurovision.service 2>/dev/null && ok "fr33d0m-neurovision → enabled (autostart)" || warn "fr33d0m-neurovision enable failed"
+    if [ -n "$TTYD_BIN" ]; then
+        systemctl --user enable fr33d0m-terminal.service 2>/dev/null && ok "fr33d0m-terminal → enabled (autostart)" || warn "fr33d0m-terminal enable failed"
+        systemctl --user enable fr33d0m-neurovision-web.service 2>/dev/null && ok "fr33d0m-neurovision-web → enabled (autostart)" || warn "fr33d0m-neurovision-web enable failed"
+    else
+        warn "ttyd not found — terminal and neurovision web services were skipped"
+    fi
+    systemctl --user disable --now fr33d0m-neurovision.service 2>/dev/null || true
 
     # Enable lingering so user services run without a login session
     if command -v loginctl &>/dev/null; then
@@ -292,10 +339,18 @@ UNIT
             || warn "Could not enable lingering (services will only run when logged in)"
     fi
 
-    # Start webui now
+    # Start web-facing services now
     systemctl --user start fr33d0m-webui.service 2>/dev/null \
         && ok "fr33d0m-webui started on port 8643" \
         || warn "fr33d0m-webui could not start now (will start on next boot)"
+    if [ -n "$TTYD_BIN" ]; then
+        systemctl --user start fr33d0m-terminal.service 2>/dev/null \
+            && ok "fr33d0m-terminal started on localhost:7681" \
+            || warn "fr33d0m-terminal could not start now"
+        systemctl --user start fr33d0m-neurovision-web.service 2>/dev/null \
+            && ok "fr33d0m-neurovision-web started on localhost:7682" \
+            || warn "fr33d0m-neurovision-web could not start now"
+    fi
 }
 
 if command -v systemctl &>/dev/null; then
@@ -336,12 +391,14 @@ echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m doctor${RESET}             Diagnose 
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m gateway start${RESET}      Start messaging gateway      ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-neurovision${RESET}        Terminal visualizer           ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${CYAN}fr33d0m-webui${RESET}              Web dashboard (:8643)        ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}  ${CYAN}Dashboard routes${RESET}           /terminal  /neurovision     ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
 echo -e "${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}"
 echo -e "${BOLD}│${RESET}  Services (autostart on boot):                              ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-webui                    ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-gateway                  ${BOLD}│${RESET}"
-echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-neurovision              ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-terminal                 ${BOLD}│${RESET}"
+echo -e "${BOLD}│${RESET}    systemctl --user status fr33d0m-neurovision-web          ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}  ${YELLOW}Next: run 'source ~/.bashrc' then 'fr33d0m setup'${RESET}          ${BOLD}│${RESET}"
 echo -e "${BOLD}│${RESET}                                                             ${BOLD}│${RESET}"
