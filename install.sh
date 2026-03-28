@@ -363,15 +363,21 @@ UNIT
             || warn "Could not enable lingering (services will only run when logged in)"
     fi
 
-    # Start web-facing services now
-    systemctl --user start fr33d0m-webui.service 2>/dev/null \
+    # Restart web-facing services so code updates take effect immediately
+    systemctl --user restart fr33d0m-webui.service 2>/dev/null \
+        && ok "fr33d0m-webui restarted on port 8643" \
+        || systemctl --user start fr33d0m-webui.service 2>/dev/null \
         && ok "fr33d0m-webui started on port 8643" \
         || warn "fr33d0m-webui could not start now (will start on next boot)"
     if [ -n "$TTYD_BIN" ]; then
-        systemctl --user start fr33d0m-terminal.service 2>/dev/null \
+        systemctl --user restart fr33d0m-terminal.service 2>/dev/null \
+            && ok "fr33d0m-terminal restarted on localhost:7681" \
+            || systemctl --user start fr33d0m-terminal.service 2>/dev/null \
             && ok "fr33d0m-terminal started on localhost:7681" \
             || warn "fr33d0m-terminal could not start now"
-        systemctl --user start fr33d0m-neurovision-web.service 2>/dev/null \
+        systemctl --user restart fr33d0m-neurovision-web.service 2>/dev/null \
+            && ok "fr33d0m-neurovision-web restarted on localhost:7682" \
+            || systemctl --user start fr33d0m-neurovision-web.service 2>/dev/null \
             && ok "fr33d0m-neurovision-web started on localhost:7682" \
             || warn "fr33d0m-neurovision-web could not start now"
     fi
