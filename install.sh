@@ -12,6 +12,37 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_BIN="$HOME/.local/bin"
 CURRENT_USER="$(whoami)"
+
+if [ "${FR33DOM_INSTALL_MODE:-}" = "packaged-only" ]; then
+    mkdir -p "$HERMES_HOME"/{skins,plugins,prisms,skills,extensions,patches}
+    mkdir -p "$LOCAL_BIN"
+    cp "$SCRIPT_DIR/skins/fr33d0m-skin.yaml" "$HERMES_HOME/skins/"
+    if [ ! -e "$HERMES_HOME/config.yaml" ]; then
+        cp "$SCRIPT_DIR/config/config.yaml" "$HERMES_HOME/config.yaml"
+    fi
+    if [ ! -e "$HERMES_HOME/SOUL.md" ]; then
+        cp "$SCRIPT_DIR/config/SOUL.md" "$HERMES_HOME/SOUL.md"
+    fi
+    if [ ! -e "$HERMES_HOME/fr33d0m-dashboard.yaml" ]; then
+        cp "$SCRIPT_DIR/config/fr33d0m-dashboard.yaml" "$HERMES_HOME/fr33d0m-dashboard.yaml"
+    fi
+    cp -r "$SCRIPT_DIR/plugins/"* "$HERMES_HOME/plugins/" 2>/dev/null || true
+    cp -r "$SCRIPT_DIR/skills/"* "$HERMES_HOME/skills/"
+    cp -r "$SCRIPT_DIR/prisms/"* "$HERMES_HOME/prisms/"
+    cp "$SCRIPT_DIR/patches/hermes-webui.patch" "$HERMES_HOME/patches/hermes-webui.patch"
+    cp "$SCRIPT_DIR/bin/fr33d0m" "$LOCAL_BIN/fr33d0m"
+    cp "$SCRIPT_DIR/bin/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-refresh-dashboard"
+    cp "$SCRIPT_DIR/bin/fr33d0m-update-everything" "$LOCAL_BIN/fr33d0m-update-everything"
+    cp "$SCRIPT_DIR/bin/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-webui"
+    cp "$SCRIPT_DIR/bin/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision"
+    cp "$SCRIPT_DIR/bin/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-neurovision-shell"
+    cp "$SCRIPT_DIR/bin/fr33d0m-terminal-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
+    chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-update-everything" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
+    ln -sf "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/hermes-webui" 2>/dev/null || true
+    ln -sf "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/hermes-neurovision" 2>/dev/null || true
+    exit 0
+fi
+
 WEBUI_DIR="$HERMES_HOME/extensions/hermes-webui"
 REFRESH_DASHBOARD_SCRIPT="$SCRIPT_DIR/bin/fr33d0m-refresh-dashboard"
 WEBUI_SERVICE_UNIT="$HOME/.config/systemd/user/fr33d0m-webui.service"
@@ -249,17 +280,18 @@ info "Installing fr33d0m commands..."
 
 cp "$SCRIPT_DIR/bin/fr33d0m"              "$LOCAL_BIN/fr33d0m"
 cp "$SCRIPT_DIR/bin/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-refresh-dashboard"
+cp "$SCRIPT_DIR/bin/fr33d0m-update-everything" "$LOCAL_BIN/fr33d0m-update-everything"
 cp "$SCRIPT_DIR/bin/fr33d0m-webui"        "$LOCAL_BIN/fr33d0m-webui"
 cp "$SCRIPT_DIR/bin/fr33d0m-neurovision"  "$LOCAL_BIN/fr33d0m-neurovision"
 cp "$SCRIPT_DIR/bin/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-neurovision-shell"
 cp "$SCRIPT_DIR/bin/fr33d0m-terminal-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
-chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
+chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-update-everything" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
 
 # Also keep hermes-* aliases for compatibility
 ln -sf "$LOCAL_BIN/fr33d0m-webui"        "$LOCAL_BIN/hermes-webui"
 ln -sf "$LOCAL_BIN/fr33d0m-neurovision"  "$LOCAL_BIN/hermes-neurovision"
 
-ok "Installed: fr33d0m, fr33d0m-refresh-dashboard, fr33d0m-webui, fr33d0m-neurovision"
+ok "Installed: fr33d0m, fr33d0m-refresh-dashboard, fr33d0m-update-everything, fr33d0m-webui, fr33d0m-neurovision"
 
 # Ensure ~/.local/bin is on PATH
 if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then

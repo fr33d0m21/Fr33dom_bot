@@ -77,6 +77,7 @@ Additional commands:
 
 ```bash
 fr33d0m-refresh-dashboard
+fr33d0m-update-everything
 fr33d0m-webui
 fr33d0m-neurovision
 ```
@@ -175,7 +176,9 @@ For most day-to-day administration, you can stay in the dashboard:
 
 `/files` is an allowlist-based file manager. It only exposes roots declared in `~/.hermes/fr33d0m-dashboard.yaml`, keeps `Personality`-owned files on the dedicated editor path, and hides seeded dashboard-maintenance paths such as `~/.hermes/fr33d0m-dashboard.yaml`, `~/.hermes/extensions/hermes-webui`, and `~/.hermes/patches`.
 
-The dashboard has no git push or git commit flow. Runtime edits stay local to the VM. If you need to reapply the packaged patch, refresh backend dependencies, rebuild the frontend, and restart the local service, use `fr33d0m-refresh-dashboard`.
+The dashboard has no git push or git commit flow for Personality, Files, or other runtime editors. Runtime edits stay local to the VM. The hub can start **Update Everything**, which only runs the server-side `fr33d0m-update-everything` script in the background and shows phase status in the UI—it does not turn the dashboard into a git client for your content.
+
+If you only need to reapply the packaged patch, refresh backend dependencies, rebuild the frontend, and restart the local WebUI service, use `fr33d0m-refresh-dashboard`.
 
 **Warning:** `fr33d0m-refresh-dashboard` now stages a fresh `hermes-webui` clone outside the live tree, reapplies the packaged patch there, refreshes backend dependencies, and rebuilds the frontend before swapping it into place. A successful refresh replaces the installed `~/.hermes/extensions/hermes-webui` tree; if startup fails after the swap, the script attempts to roll back to the previous live tree.
 
@@ -400,6 +403,33 @@ fr33d0m-refresh-dashboard
 This is a local maintenance command for the installed runtime. It does not commit changes, push branches, or update the packaging repo.
 
 **Warning:** It stages and rebuilds a fresh `hermes-webui` clone before the final swap, but a successful refresh still replaces the installed `~/.hermes/extensions/hermes-webui` tree. If startup fails after the swap, the script attempts to restore the previous live tree.
+
+## Update Everything
+
+**Update Everything** is the automated maintenance job implemented by `fr33d0m-update-everything`. You can run it from a shell on the VM or start it from the Fr33d0m hub in the dashboard (same script, detached, with live phase status when a status file is in use).
+
+### What it updates
+
+1. **Fr33dom_bot git checkout** — Fast-forwards `main` from `origin` (`git fetch` / `git pull --ff-only`). The packaging directory must have a **clean** working tree or the job stops in preflight.
+2. **Packaged files on disk** — Runs `install.sh` with `FR33DOM_INSTALL_MODE=packaged-only`, which copies wrappers, `patches/hermes-webui.patch`, skin, seeded `fr33d0m-dashboard.yaml`, plugins, skills, and prisms into `~/.hermes`. This path **does not** run the full installer or Ubuntu apt dependency phase.
+3. **Hermes Agent core** — Runs `fr33d0m update`.
+4. **Other Hermes extensions** — For each `~/.hermes/extensions/*` directory that is a git repository **except** `hermes-webui`, runs `git pull --ff-only`.
+5. **Python dependencies** — Refreshes editable installs or `requirements.txt` installs into the Hermes venv for those extensions (again skipping the WebUI tree here).
+6. **Dashboard** — Invokes `fr33d0m-refresh-dashboard` so the WebUI is rebuilt from a **staged** clone with the packaged patch applied, then swapped into place and the `fr33d0m-webui` service restarted.
+7. **Companion services** — Restarts `fr33d0m-gateway`, `fr33d0m-terminal`, and `fr33d0m-neurovision-web` so they pick up refreshed assets.
+
+### What it does not do
+
+- **Operating system** — No `apt upgrade`, no distribution upgrade, and no automatic **reboot**. It is an application-level maintainer, not an OS updater.
+- **Direct upstream sync of `hermes-webui`** — The installed dashboard track is defined by the **packaged patch** plus the staged refresh; the job does not `git pull` the upstream `hermes-webui` remote for you.
+- **Git commits or pushes from the dashboard** — The dashboard still does not expose commit/push for runtime edits. Update Everything may **pull** your existing `~/Fr33dom_bot` clone forward, but it does not push changes to GitHub or create commits for operator file edits.
+
+### Safety guarantees and failure reporting
+
+- **Preflight** — Verifies tools, paths, minimum free disk space under `HOME`, and avoids overlapping runs when refresh/update status files show another job in progress.
+- **Staged WebUI build** — Matches `fr33d0m-refresh-dashboard`: build in a temporary clone, then swap; failed post-swap startup attempts **rollback** to the previous live `hermes-webui` tree.
+- **Phased status** — When driven from the dashboard, the script records phases, log tail, and completion state under `~/.hermes/logs/` (for example `update-everything.status.json` and the companion log). The UI polls this so you can see which step failed.
+- **Outcomes** — Blocking failures stop later phases and mark the job as **failure**. If the pipeline completes but post-checks report inactive units or a failed authenticated health probe, the job may still end as **partial_failure** while exiting `0`, signaling “finished with warnings—inspect logs and service status.”
 
 ## Snapshot Workflow
 

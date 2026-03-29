@@ -1,0 +1,673 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+REPO="${FR33DOM_BOT_REPO:-$HOME/Fr33dom_bot}"
+LOGS_DIR="${HERMES_HOME}/logs"
+DEFAULT_STATUS_FILE="${LOGS_DIR}/update-everything.status.json"
+DEFAULT_REFRESH_STATUS_FILE="${LOGS_DIR}/dashboard-refresh.status.json"
+STATUS_FILE="${FR33DOM_UPDATE_EVERYTHING_STATUS_FILE:-$DEFAULT_STATUS_FILE}"
+REFRESH_STATUS_FILE="${FR33DOM_REFRESH_STATUS_FILE:-$DEFAULT_REFRESH_STATUS_FILE}"
+REFRESH_LOG_FILE="${FR33DOM_REFRESH_LOG_FILE:-$(dirname "$REFRESH_STATUS_FILE")/dashboard-refresh.log}"
+DEFAULT_REFRESH_STALE_SECONDS=900
+STATUS_FILE_WAS_OVERRIDDEN=0
+if [ -n "${FR33DOM_UPDATE_EVERYTHING_STATUS_FILE:-}" ]; then
+    STATUS_FILE_WAS_OVERRIDDEN=1
+fi
+UE_STATUS_OWNED=0
+UE_STATUS_FOREIGN_LOCK=0
+EXTENSIONS_ROOT="$HERMES_HOME/extensions"
+AUTH_JSON="$HERMES_HOME/auth.json"
+HEALTH_URL="${FR33DOM_HEALTH_URL:-http://127.0.0.1:8643/api/health}"
+PROTECTED_STATUS_URL="${FR33DOM_PROTECTED_STATUS_URL:-http://127.0.0.1:8643/api/admin/update-everything/status}"
+HERMES_PYTHON="${HERMES_HOME}/hermes-agent/venv/bin/python"
+MIN_DISK_BYTES=$((500 * 1024 * 1024))
+
+# Prepend ~/.local/bin without reordering the rest of PATH so harness stubs stay ahead of system git.
+export PATH="$HOME/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
+
+if [ -d "/run/user/$(id -u)" ]; then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+    fi
+fi
+
+stage() {
+    printf "\n==> %s\n" "$1"
+}
+
+warn() {
+    printf "WARN: %s\n" "$1"
+}
+
+fail() {
+    printf "ERROR: %s\n" "$1" >&2
+    if ue_status_writable; then
+        ue_phase "preflight" "failure" "$1"
+        ue_append_log "Preflight failed: $1"
+        ue_finalize_job "failure"
+    fi
+    exit 1
+}
+
+# Mark a phase failed, write terminal job state, and exit 1 (caller owns the failure path).
+ue_abort_failed() {
+    local phase="$1"
+    local detail="$2"
+    ue_phase "$phase" "failure" "$detail"
+    ue_append_log "$detail"
+    ue_finalize_job "failure"
+    exit 1
+}
+
+ue_status_writable() {
+    [ "$UE_STATUS_OWNED" = "1" ] && [ -n "$STATUS_FILE" ] && [ -f "$STATUS_FILE" ]
+}
+
+ue_init_status_file() {
+    [ -n "$STATUS_FILE" ] || return 0
+    mkdir -p "$(dirname "$STATUS_FILE")"
+
+    if [ "$STATUS_FILE_WAS_OVERRIDDEN" != "1" ] && [ -f "$STATUS_FILE" ]; then
+        export FR33DOM_UE_STATUS_FILE="$STATUS_FILE"
+        export FR33DOM_UE_SELF_PID="$$"
+        local other_pid
+        other_pid="$(
+            python3 -c "
+import json
+import os
+import sys
+
+path = os.environ.get('FR33DOM_UE_STATUS_FILE')
+self_pid = int(os.environ.get('FR33DOM_UE_SELF_PID', '0') or 0)
+if not path or not os.path.isfile(path):
+    sys.exit(0)
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+if data.get('job_type') not in ('update_everything', 'update-everything'):
+    sys.exit(0)
+if data.get('state') != 'running':
+    sys.exit(0)
+if data.get('running') is False:
+    sys.exit(0)
+raw = data.get('pid')
+if raw is None:
+    sys.exit(0)
+try:
+    opid = int(raw)
+except (TypeError, ValueError):
+    sys.exit(0)
+if opid == self_pid:
+    sys.exit(0)
+sys.stdout.write(str(opid))
+" 2>/dev/null || true
+        )"
+        if [ -n "$other_pid" ] && kill -0 "$other_pid" 2>/dev/null; then
+            UE_STATUS_FOREIGN_LOCK=1
+            return 0
+        fi
+    fi
+
+    UE_STATUS_OWNED=1
+    if [ "$STATUS_FILE_WAS_OVERRIDDEN" = "1" ] && [ -f "$STATUS_FILE" ]; then
+        return 0
+    fi
+
+    export UE_JSON_FILE="$STATUS_FILE"
+    export UE_JOB_PID="$$"
+    python3 -c 'import json,os,time; p=os.environ["UE_JSON_FILE"]; now=time.time(); d={"job_type":"update_everything","state":"running","running":True,"pid":int(os.environ["UE_JOB_PID"]),"current_phase":None,"phases":[],"started_at":now,"completed_at":None,"last_updated_at":now,"stale_after_seconds":900,"log":""}; json.dump(d,open(p,"w"))'
+}
+
+ue_bump_ts() {
+    ue_status_writable || return 0
+    export UE_JSON_FILE="$STATUS_FILE"
+    python3 -c 'import json,os,time; p=os.environ["UE_JSON_FILE"]; d=json.load(open(p)); d["last_updated_at"]=time.time(); json.dump(d,open(p,"w"))'
+}
+
+ue_append_log() {
+    ue_status_writable || return 0
+    export UE_JSON_FILE="$STATUS_FILE"
+    export UE_LOG_LINE="$1"
+    python3 -c 'import json,os,time; p=os.environ["UE_JSON_FILE"]; d=json.load(open(p)); chunk=os.environ.get("UE_LOG_LINE","")+"\n"; log=(d.get("log") or "")+chunk; d["log"]=log[-262144:]; d["last_updated_at"]=time.time(); json.dump(d,open(p,"w"))'
+}
+
+ue_set_current_phase() {
+    ue_status_writable || return 0
+    export UE_JSON_FILE="$STATUS_FILE"
+    export UE_CURRENT_PHASE="$1"
+    python3 -c 'import json,os,time; p=os.environ["UE_JSON_FILE"]; d=json.load(open(p)); d["current_phase"]=os.environ.get("UE_CURRENT_PHASE"); d["last_updated_at"]=time.time(); json.dump(d,open(p,"w"))'
+}
+
+ue_phase() {
+    # ue_phase NAME STATE DETAIL
+    ue_status_writable || return 0
+    export UE_JSON_FILE="$STATUS_FILE"
+    export UE_PHASE_NAME="$1"
+    export UE_PHASE_STATE="$2"
+    export UE_PHASE_DETAIL="${3:-}"
+    python3 <<'PY'
+import json, os, time
+
+p = os.environ.get("UE_JSON_FILE")
+if not p or not os.path.isfile(p):
+    raise SystemExit(0)
+
+name = os.environ["UE_PHASE_NAME"]
+state = os.environ["UE_PHASE_STATE"]
+detail = os.environ.get("UE_PHASE_DETAIL", "")
+
+with open(p) as f:
+    d = json.load(f)
+
+phases = list(d.get("phases") or [])
+now = time.time()
+found = None
+for ph in phases:
+    if ph.get("name") == name:
+        found = ph
+        break
+if found is None:
+    found = {
+        "name": name,
+        "state": "pending",
+        "detail": "",
+        "started_at": None,
+        "completed_at": None,
+    }
+    phases.append(found)
+
+legacy_summary = found.pop("summary", "")
+if not found.get("detail") and legacy_summary:
+    found["detail"] = legacy_summary
+found["state"] = state
+if detail:
+    found["detail"] = detail
+if state == "running" and not found.get("started_at"):
+    found["started_at"] = now
+if state in ("success", "failure", "skipped"):
+    found["completed_at"] = now
+
+d["phases"] = phases
+d["last_updated_at"] = now
+with open(p, "w") as f:
+    json.dump(d, f)
+PY
+}
+
+ue_finalize_job() {
+    # ue_finalize_job STATE
+    ue_status_writable || return 0
+    export UE_JSON_FILE="$STATUS_FILE"
+    export UE_JOB_STATE="$1"
+    python3 -c 'import json,os,time; p=os.environ["UE_JSON_FILE"]; d=json.load(open(p)); d["state"]=os.environ["UE_JOB_STATE"]; d["running"]=False; d["completed_at"]=time.time(); d["current_phase"]=None; d["last_updated_at"]=time.time(); json.dump(d,open(p,"w"))'
+}
+
+dashboard_refresh_lock_active() {
+    [ -f "$REFRESH_STATUS_FILE" ] || return 1
+    export FR33DOM_REFRESH_STATUS_FILE="$REFRESH_STATUS_FILE"
+    export FR33DOM_REFRESH_LOG_FILE="$REFRESH_LOG_FILE"
+    export FR33DOM_REFRESH_STALE_SECONDS_DEFAULT="$DEFAULT_REFRESH_STALE_SECONDS"
+    python3 <<'PY'
+import json
+import os
+import time
+from pathlib import Path
+
+
+def coerce_int(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def coerce_float(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+status_path = Path(os.environ["FR33DOM_REFRESH_STATUS_FILE"])
+if not status_path.is_file():
+    raise SystemExit(1)
+
+try:
+    raw = json.loads(status_path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+if not isinstance(raw, dict):
+    raise SystemExit(1)
+
+state = raw.get("state")
+state = state.lower() if isinstance(state, str) else "idle"
+running_flag = raw.get("running")
+
+if state != "running" and running_flag is not True:
+    raise SystemExit(1)
+
+pid = coerce_int(raw.get("pid"))
+if pid is not None and pid > 0:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        pass
+    else:
+        raise SystemExit(0)
+
+log_path = Path(os.environ["FR33DOM_REFRESH_LOG_FILE"])
+try:
+    log_text = log_path.read_text(encoding="utf-8", errors="replace")
+except OSError:
+    log_text = ""
+
+if "==> Dashboard refresh complete" in log_text:
+    raise SystemExit(1)
+if "ERROR:" in log_text or "Traceback" in log_text:
+    raise SystemExit(1)
+
+normalized = log_text.strip()
+if normalized and "Waiting for detached refresh process to start..." not in normalized:
+    raise SystemExit(1)
+
+stale_after = coerce_float(raw.get("stale_after_seconds"))
+if stale_after is None or stale_after <= 0:
+    stale_after = coerce_float(os.environ.get("FR33DOM_REFRESH_STALE_SECONDS_DEFAULT")) or 900.0
+
+touch = coerce_float(raw.get("last_updated_at"))
+if touch is None:
+    touch = coerce_float(raw.get("completed_at"))
+if touch is None:
+    touch = coerce_float(raw.get("started_at"))
+
+if touch is not None and (time.time() - touch) > stale_after:
+    raise SystemExit(1)
+
+# If we cannot prove the job is finished but it is still recent, keep the lock.
+raise SystemExit(0)
+PY
+}
+
+run_logged() {
+    local msg="$1"
+    shift
+    ue_bump_ts
+    ue_append_log "$msg"
+    "$@"
+    local rc=$?
+    ue_bump_ts
+    return "$rc"
+}
+
+preflight() {
+    stage "Preflight"
+    if [ "$UE_STATUS_FOREIGN_LOCK" = "1" ]; then
+        fail "Another update-everything job appears to be running (status file lock)"
+    fi
+    ue_set_current_phase "preflight"
+    ue_phase "preflight" "running" ""
+
+    command -v git >/dev/null 2>&1 || fail "git not found"
+    command -v bash >/dev/null 2>&1 || fail "bash not found"
+    command -v python3 >/dev/null 2>&1 || fail "python3 not found"
+    command -v curl >/dev/null 2>&1 || fail "curl not found"
+    command -v systemctl >/dev/null 2>&1 || fail "systemctl not found"
+
+    [ -d "$REPO" ] || fail "Fr33dom_bot repo missing at $REPO"
+    [ -d "$REPO/.git" ] || fail "Fr33dom_bot path is not a git checkout: $REPO"
+    [ -d "$HERMES_HOME" ] || fail "HERMES_HOME missing at $HERMES_HOME"
+    [ -d "$EXTENSIONS_ROOT" ] || fail "Hermes extensions directory missing at $EXTENSIONS_ROOT"
+
+    export MIN_DISK_BYTES
+    python3 -c "import os, shutil, sys; home=os.path.expanduser(os.environ.get('HOME','/')); need=int(os.environ.get('MIN_DISK_BYTES','0')); sys.exit(0 if shutil.disk_usage(home).free >= need else 1)" \
+        || fail "Insufficient free disk space under HOME (need at least 500MiB)"
+
+    if [ -z "${FR33DOM_SKIP_PREFLIGHT_LOCK_CHECK:-}" ]; then
+        if dashboard_refresh_lock_active; then
+            fail "Another dashboard refresh job appears to be running (lock file check)"
+        fi
+        if ue_status_writable; then
+            export FR33DOM_UE_STATUS_FILE="$STATUS_FILE"
+            other_pid="$(
+                python3 -c "
+import json
+import os
+import sys
+
+path = os.environ.get('FR33DOM_UE_STATUS_FILE')
+if not path or not os.path.isfile(path):
+    sys.exit(0)
+with open(path) as f:
+    data = json.load(f)
+if data.get('job_type') not in ('update_everything', 'update-everything'):
+    sys.exit(0)
+if data.get('state') != 'running':
+    sys.exit(0)
+if data.get('running') is False:
+    sys.exit(0)
+raw = data.get('pid')
+if raw is None:
+    sys.exit(0)
+try:
+    opid = int(raw)
+except (TypeError, ValueError):
+    sys.exit(0)
+sys.stdout.write(str(opid))
+" 2>/dev/null || true
+            )"
+            if [ -n "$other_pid" ] && [ "$other_pid" -ne $$ ] && kill -0 "$other_pid" 2>/dev/null; then
+                fail "Another update-everything job appears to be running (status file lock)"
+            fi
+        fi
+    fi
+
+    ue_phase "preflight" "success" "ok"
+    ue_append_log "Preflight completed"
+}
+
+repo_sync() {
+    stage "Repo sync"
+    ue_set_current_phase "repo_sync"
+    ue_phase "repo_sync" "running" ""
+
+    ue_bump_ts
+    if ! git -C "$REPO" diff-index --quiet HEAD --; then
+        ue_abort_failed "repo_sync" "dirty working tree (tracked changes)"
+    fi
+    ue_bump_ts
+
+    if ! run_logged "git fetch origin main" git -C "$REPO" fetch origin main; then
+        ue_abort_failed "repo_sync" "git fetch origin main failed"
+    fi
+    if ! run_logged "git pull --ff-only origin main" git -C "$REPO" pull --ff-only origin main; then
+        ue_abort_failed "repo_sync" "git pull --ff-only origin main failed"
+    fi
+
+    ue_phase "repo_sync" "success" "fast-forwarded origin/main"
+    ue_append_log "Repo sync completed"
+}
+
+packaged_install_refresh() {
+    stage "Packaged install refresh"
+    ue_set_current_phase "packaged_install"
+    ue_phase "packaged_install" "running" ""
+
+    if [ ! -f "$REPO/install.sh" ]; then
+        ue_abort_failed "packaged_install" "install.sh missing in repo"
+    fi
+
+    if ! run_logged "FR33DOM_INSTALL_MODE=packaged-only install.sh" env FR33DOM_INSTALL_MODE=packaged-only bash "$REPO/install.sh"; then
+        ue_abort_failed "packaged_install" "packaged-only install.sh failed"
+    fi
+
+    ue_phase "packaged_install" "success" "refreshed packaged assets"
+    ue_append_log "Packaged install refresh completed"
+}
+
+hermes_core_update() {
+    stage "Hermes core update"
+    ue_set_current_phase "hermes_core"
+    ue_phase "hermes_core" "running" ""
+
+    local fr33="${HOME}/.local/bin/fr33d0m"
+    if [ ! -x "$fr33" ]; then
+        ue_abort_failed "hermes_core" "fr33d0m CLI missing at $fr33"
+    fi
+
+    ue_bump_ts
+    local out rc
+    set +e
+    out="$("$fr33" update 2>&1)"
+    rc=$?
+    set -e
+    ue_bump_ts
+
+    if [ "$rc" -ne 0 ]; then
+        ue_phase "hermes_core" "failure" "fr33d0m update exited $rc"
+        ue_append_log "$out"
+        ue_finalize_job "failure"
+        exit 1
+    fi
+
+    printf "%s\n" "$out"
+    ue_append_log "$out"
+
+    if printf "%s\n" "$out" | grep -qiE 'already up to date|no update needed|nothing to update'; then
+        ue_phase "hermes_core" "skipped" "no update needed"
+    else
+        ue_phase "hermes_core" "success" "Hermes core updated"
+    fi
+}
+
+extensions_update() {
+    stage "Extensions update"
+    ue_set_current_phase "extensions"
+    ue_phase "extensions" "running" ""
+
+    local ext_count=0
+    local any_update=0
+    local name before after
+    shopt -s nullglob
+    for ext_dir in "$EXTENSIONS_ROOT"/*; do
+        [ -d "$ext_dir" ] || continue
+        [ -d "$ext_dir/.git" ] || continue
+        name="$(basename "$ext_dir")"
+        if [ "$name" = "hermes-webui" ]; then
+            continue
+        fi
+        ext_count=$((ext_count + 1))
+        before="$(git -C "$ext_dir" rev-parse HEAD)" || ue_abort_failed "extensions" "cannot read HEAD in $name"
+        ue_bump_ts
+        ue_append_log "git pull $name"
+        if ! git -C "$ext_dir" pull --ff-only; then
+            ue_abort_failed "extensions" "git pull --ff-only failed for $name"
+        fi
+        ue_bump_ts
+        after="$(git -C "$ext_dir" rev-parse HEAD)" || ue_abort_failed "extensions" "cannot read HEAD after pull in $name"
+        if [ "$before" != "$after" ]; then
+            any_update=1
+        fi
+    done
+    shopt -u nullglob
+
+    if [ "$ext_count" -eq 0 ]; then
+        ue_phase "extensions" "skipped" "no managed extension repos"
+    elif [ "$any_update" -eq 0 ]; then
+        ue_phase "extensions" "skipped" "no extension updates needed"
+    else
+        ue_phase "extensions" "success" "updated $ext_count extension repos"
+    fi
+    ue_append_log "Extensions update completed"
+}
+
+dependency_refresh() {
+    stage "Dependency refresh"
+    ue_set_current_phase "dependencies"
+    ue_phase "dependencies" "running" ""
+
+    local refreshed=0
+    local ext_dir name
+
+    shopt -s nullglob
+    for ext_dir in "$EXTENSIONS_ROOT"/*; do
+        [ -d "$ext_dir" ] || continue
+        name="$(basename "$ext_dir")"
+        if [ "$name" = "hermes-webui" ]; then
+            continue
+        fi
+        if [ -f "$ext_dir/pyproject.toml" ]; then
+            if command -v uv >/dev/null 2>&1 && [ -x "$HERMES_PYTHON" ]; then
+                if ! run_logged "uv pip install -e $name" uv pip install -e "$ext_dir" --python "$HERMES_PYTHON"; then
+                    ue_abort_failed "dependencies" "uv pip install -e failed for $name"
+                fi
+                refreshed=$((refreshed + 1))
+            elif [ -x "$HERMES_PYTHON" ]; then
+                if ! run_logged "pip install -e $name" "$HERMES_PYTHON" -m pip install -e "$ext_dir"; then
+                    ue_abort_failed "dependencies" "pip install -e failed for $name"
+                fi
+                refreshed=$((refreshed + 1))
+            else
+                msg="cannot refresh $name: pyproject.toml needs uv or Hermes venv python at $HERMES_PYTHON"
+                printf "ERROR: %s\n" "$msg" >&2
+                ue_abort_failed "dependencies" "$msg"
+            fi
+        elif [ -f "$ext_dir/requirements.txt" ]; then
+            if command -v uv >/dev/null 2>&1 && [ -x "$HERMES_PYTHON" ]; then
+                if ! run_logged "uv pip install -r $name" uv pip install -r "$ext_dir/requirements.txt" --python "$HERMES_PYTHON"; then
+                    ue_abort_failed "dependencies" "uv pip install -r failed for $name"
+                fi
+                refreshed=$((refreshed + 1))
+            elif [ -x "$HERMES_PYTHON" ]; then
+                if ! run_logged "pip install -r $name" "$HERMES_PYTHON" -m pip install -r "$ext_dir/requirements.txt"; then
+                    ue_abort_failed "dependencies" "pip install -r failed for $name"
+                fi
+                refreshed=$((refreshed + 1))
+            else
+                msg="cannot refresh $name: requirements.txt needs uv or Hermes venv python at $HERMES_PYTHON"
+                printf "ERROR: %s\n" "$msg" >&2
+                ue_abort_failed "dependencies" "$msg"
+            fi
+        fi
+    done
+    shopt -u nullglob
+
+    if [ "$refreshed" -eq 0 ]; then
+        ue_phase "dependencies" "skipped" "no extension python deps to refresh"
+    else
+        ue_phase "dependencies" "success" "refreshed $refreshed extension python targets"
+    fi
+    ue_append_log "Dependency refresh completed"
+}
+
+dashboard_refresh() {
+    stage "Staged dashboard refresh"
+    ue_set_current_phase "dashboard_refresh"
+    ue_phase "dashboard_refresh" "running" ""
+
+    if ! command -v fr33d0m-refresh-dashboard >/dev/null 2>&1; then
+        ue_abort_failed "dashboard_refresh" "fr33d0m-refresh-dashboard not on PATH"
+    fi
+
+    if ! run_logged "fr33d0m-refresh-dashboard" fr33d0m-refresh-dashboard; then
+        ue_abort_failed "dashboard_refresh" "fr33d0m-refresh-dashboard failed"
+    fi
+
+    ue_phase "dashboard_refresh" "success" "staged refresh complete"
+    ue_append_log "Dashboard refresh completed"
+}
+
+service_reload() {
+    stage "Non-WebUI service reload"
+    ue_set_current_phase "service_reload"
+    ue_phase "service_reload" "running" ""
+
+    local svc
+    for svc in fr33d0m-gateway.service fr33d0m-terminal.service fr33d0m-neurovision-web.service; do
+        if ! run_logged "systemctl restart $svc" systemctl --user restart "$svc"; then
+            ue_abort_failed "service_reload" "systemctl restart failed for $svc"
+        fi
+    done
+
+    ue_phase "service_reload" "success" "restarted gateway, terminal, neurovision web"
+    ue_append_log "Service reload completed"
+}
+
+post_checks() {
+    stage "Post-checks"
+    ue_set_current_phase "post_checks"
+    ue_phase "post_checks" "running" ""
+
+    local issues=0
+    local token
+    token="$(
+        python3 -c "import json, pathlib, os; p=pathlib.Path(os.environ['HERMES_HOME'])/'auth.json'; d=json.loads(p.read_text()); print(d.get('webui_token') or d.get('dashboard_token') or d.get('token') or d.get('api_token') or '')" 2>/dev/null || true
+    )"
+
+    set +e
+    local svc
+    for svc in fr33d0m-webui fr33d0m-gateway fr33d0m-terminal fr33d0m-neurovision-web; do
+        systemctl --user is-active "${svc}.service" >/dev/null 2>&1
+        local ac=$?
+        ue_append_log "systemctl is-active ${svc}.service exited $ac"
+        if [ "$ac" -ne 0 ]; then
+            warn "$svc.service is not active"
+            issues=$((issues + 1))
+        fi
+    done
+
+    if [ -z "$token" ]; then
+        warn "No dashboard token found in auth.json; skipping authenticated dashboard checks"
+        issues=$((issues + 1))
+    else
+        curl -fsS -H "X-Hermes-Token: ${token}" "$HEALTH_URL" >/dev/null
+        local health_rc=$?
+        ue_append_log "curl $HEALTH_URL exited $health_rc"
+        if [ "$health_rc" -ne 0 ]; then
+            warn "Authenticated health check failed"
+            issues=$((issues + 1))
+        fi
+
+        curl -fsS -H "X-Hermes-Token: ${token}" "$PROTECTED_STATUS_URL" >/dev/null
+        local protected_rc=$?
+        ue_append_log "curl $PROTECTED_STATUS_URL exited $protected_rc"
+        if [ "$protected_rc" -ne 0 ]; then
+            warn "Protected dashboard auth check failed"
+            issues=$((issues + 1))
+        fi
+    fi
+    set -e
+
+    if [ "$issues" -gt 0 ]; then
+        ue_phase "post_checks" "failure" "post-check degradation ($issues issue(s))"
+        ue_append_log "Post-checks completed with $issues issue(s)"
+    else
+        ue_phase "post_checks" "success" "services and dashboard auth checks ok"
+        ue_append_log "Post-checks completed"
+    fi
+}
+
+main() {
+    export MIN_DISK_BYTES
+    export HERMES_HOME
+
+    ue_init_status_file
+    preflight
+    repo_sync
+    packaged_install_refresh
+    hermes_core_update
+    extensions_update
+    dependency_refresh
+    dashboard_refresh
+    service_reload
+    post_checks
+
+    if ue_status_writable; then
+        if python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open(p)); post=[ph for ph in d.get('phases',[]) if ph.get('name')=='post_checks']; degraded=post and post[-1].get('state')=='failure'; sys.exit(0 if degraded else 1)" "$STATUS_FILE" 2>/dev/null; then
+            ue_finalize_job "partial_failure"
+            exit 0
+        fi
+        ue_finalize_job "success"
+    fi
+    exit 0
+}
+
+main "$@"

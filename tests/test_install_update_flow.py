@@ -155,7 +155,7 @@ class InstallScriptUpdateFlowTests(unittest.TestCase):
         service_dir.mkdir(parents=True, exist_ok=True)
         (service_dir / "fr33d0m-webui.service").write_text("[Unit]\nDescription=stub\n", encoding="utf-8")
 
-    def _run_install(self) -> subprocess.CompletedProcess[str]:
+    def _run_install(self, **env_overrides: str) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.update(
             {
@@ -165,6 +165,7 @@ class InstallScriptUpdateFlowTests(unittest.TestCase):
                 "INSTALL_TEST_LOG": str(self.command_log),
             }
         )
+        env.update(env_overrides)
         return subprocess.run(
             ["bash", str(SCRIPT_PATH)],
             capture_output=True,
@@ -206,6 +207,29 @@ class InstallScriptUpdateFlowTests(unittest.TestCase):
         log_lines = self._command_log_lines()
         self.assertTrue(any(f"cwd={self.frontend_dir}" in line for line in log_lines if line.startswith("npm\t")), log_lines)
         self.assertTrue(any(f"cwd={self.frontend_dir}" in line for line in log_lines if line.startswith("npx\t")), log_lines)
+
+    def test_packaged_only_refresh_preserves_operator_runtime_files(self) -> None:
+        existing = {
+            "config.yaml": "operator: config\n",
+            "SOUL.md": "# operator soul\n",
+            "fr33d0m-dashboard.yaml": "dashboard: operator\n",
+        }
+        for name, content in existing.items():
+            (self.hermes_home / name).write_text(content, encoding="utf-8")
+
+        result = self._run_install(FR33DOM_INSTALL_MODE="packaged-only")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name, content in existing.items():
+            self.assertEqual((self.hermes_home / name).read_text(encoding="utf-8"), content)
+
+    def test_packaged_only_refresh_seeds_missing_runtime_files(self) -> None:
+        result = self._run_install(FR33DOM_INSTALL_MODE="packaged-only")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("config.yaml", "SOUL.md", "fr33d0m-dashboard.yaml"):
+            expected = (REPO_ROOT / "config" / name).read_text(encoding="utf-8")
+            self.assertEqual((self.hermes_home / name).read_text(encoding="utf-8"), expected)
 
 
 if __name__ == "__main__":
