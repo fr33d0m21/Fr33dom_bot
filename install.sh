@@ -12,6 +12,10 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_BIN="$HOME/.local/bin"
 CURRENT_USER="$(whoami)"
+WEBUI_DIR="$HERMES_HOME/extensions/hermes-webui"
+REFRESH_DASHBOARD_SCRIPT="$SCRIPT_DIR/bin/fr33d0m-refresh-dashboard"
+WEBUI_SERVICE_UNIT="$HOME/.config/systemd/user/fr33d0m-webui.service"
+USE_STAGED_WEBUI_REFRESH=false
 
 info()  { printf "${CYAN}→${RESET} %s\n" "$1"; }
 ok()    { printf "${GREEN}✓${RESET} %s\n" "$1"; }
@@ -95,7 +99,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # Phase 3: Directory structure
 # ═════════════════════════════════════════════════════════════════════════════
 
-mkdir -p "$HERMES_HOME"/{skins,plugins,prisms,skills,extensions}
+mkdir -p "$HERMES_HOME"/{skins,plugins,prisms,skills,extensions,patches}
 mkdir -p "$LOCAL_BIN"
 ok "Directory structure ready"
 
@@ -108,7 +112,8 @@ ok "Installed fr33d0m-skin"
 
 cp "$SCRIPT_DIR/config/config.yaml" "$HERMES_HOME/config.yaml"
 cp "$SCRIPT_DIR/config/SOUL.md" "$HERMES_HOME/SOUL.md"
-ok "Config and persona installed"
+cp "$SCRIPT_DIR/config/fr33d0m-dashboard.yaml" "$HERMES_HOME/fr33d0m-dashboard.yaml"
+ok "Config, persona, and dashboard runtime config installed"
 
 cp -r "$SCRIPT_DIR/plugins/"* "$HERMES_HOME/plugins/" 2>/dev/null || true
 ok "Installed plugins ($(ls -d "$HERMES_HOME/plugins/evey-"* 2>/dev/null | wc -l) evey + skill_factory)"
@@ -118,6 +123,9 @@ ok "Installed custom skills"
 
 cp -r "$SCRIPT_DIR/prisms/"* "$HERMES_HOME/prisms/"
 ok "Installed $(ls "$HERMES_HOME/prisms/"*.md 2>/dev/null | wc -l) analytical prisms"
+
+cp "$SCRIPT_DIR/patches/hermes-webui.patch" "$HERMES_HOME/patches/hermes-webui.patch"
+ok "Installed local dashboard patch"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Phase 5: Clone extension repos
@@ -146,8 +154,8 @@ for repo_url in "${EXTENSIONS[@]}"; do
 done
 
 apply_webui_patch() {
-    local patch_file="$SCRIPT_DIR/patches/hermes-webui.patch"
-    local target_dir="$HERMES_HOME/extensions/hermes-webui"
+    local patch_file="$HERMES_HOME/patches/hermes-webui.patch"
+    local target_dir="$WEBUI_DIR"
 
     if [ ! -f "$patch_file" ] || [ ! -d "$target_dir/.git" ]; then
         return
@@ -172,7 +180,27 @@ apply_webui_patch() {
     fi
 }
 
-apply_webui_patch
+can_use_staged_webui_refresh() {
+    [ -f "$REFRESH_DASHBOARD_SCRIPT" ] \
+        && [ -d "$WEBUI_DIR/.git" ] \
+        && [ -d "$WEBUI_DIR/frontend" ] \
+        && [ -x "$WEBUI_DIR/venv/bin/python" ] \
+        && [ -f "$HERMES_HOME/patches/hermes-webui.patch" ] \
+        && [ -f "$WEBUI_SERVICE_UNIT" ] \
+        && command -v systemctl &>/dev/null
+}
+
+refresh_webui_via_staged_swap() {
+    info "Refreshing installed WebUI via staged swap..."
+    HERMES_HOME="$HERMES_HOME" bash "$REFRESH_DASHBOARD_SCRIPT"
+    ok "WebUI refreshed via staged swap"
+}
+
+if can_use_staged_webui_refresh; then
+    USE_STAGED_WEBUI_REFRESH=true
+else
+    apply_webui_patch
+fi
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Phase 6: Install Python packages into Hermes venv
@@ -192,21 +220,24 @@ fi
 # Phase 7: Install WebUI (own venv + frontend build)
 # ═════════════════════════════════════════════════════════════════════════════
 
-WEBUI_DIR="$HERMES_HOME/extensions/hermes-webui"
 if [ -d "$WEBUI_DIR" ]; then
-    if [ ! -d "$WEBUI_DIR/venv" ]; then
-        info "Setting up WebUI Python environment..."
-        uv venv "$WEBUI_DIR/venv" --python 3.11 2>/dev/null
-        ok "WebUI backend environment created"
+    if [ "$USE_STAGED_WEBUI_REFRESH" = true ]; then
+        refresh_webui_via_staged_swap
     else
-        ok "WebUI backend environment already set up"
-    fi
-    uv pip install -e "$WEBUI_DIR" --python "$WEBUI_DIR/venv/bin/python" 2>/dev/null
-    ok "WebUI backend installed"
-    if [ -d "$WEBUI_DIR/frontend" ] && command -v npm &>/dev/null; then
-        info "Building WebUI frontend..."
-        (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
-        ok "WebUI frontend built"
+        if [ ! -d "$WEBUI_DIR/venv" ]; then
+            info "Setting up WebUI Python environment..."
+            uv venv "$WEBUI_DIR/venv" --python 3.11 2>/dev/null
+            ok "WebUI backend environment created"
+        else
+            ok "WebUI backend environment already set up"
+        fi
+        uv pip install -e "$WEBUI_DIR" --python "$WEBUI_DIR/venv/bin/python" 2>/dev/null
+        ok "WebUI backend installed"
+        if [ -d "$WEBUI_DIR/frontend" ] && command -v npm &>/dev/null; then
+            info "Building WebUI frontend..."
+            (cd "$WEBUI_DIR/frontend" && npm install --silent 2>/dev/null && npx vite build 2>/dev/null)
+            ok "WebUI frontend built"
+        fi
     fi
 fi
 
@@ -217,17 +248,18 @@ fi
 info "Installing fr33d0m commands..."
 
 cp "$SCRIPT_DIR/bin/fr33d0m"              "$LOCAL_BIN/fr33d0m"
+cp "$SCRIPT_DIR/bin/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-refresh-dashboard"
 cp "$SCRIPT_DIR/bin/fr33d0m-webui"        "$LOCAL_BIN/fr33d0m-webui"
 cp "$SCRIPT_DIR/bin/fr33d0m-neurovision"  "$LOCAL_BIN/fr33d0m-neurovision"
 cp "$SCRIPT_DIR/bin/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-neurovision-shell"
 cp "$SCRIPT_DIR/bin/fr33d0m-terminal-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
-chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
+chmod +x "$LOCAL_BIN/fr33d0m" "$LOCAL_BIN/fr33d0m-refresh-dashboard" "$LOCAL_BIN/fr33d0m-webui" "$LOCAL_BIN/fr33d0m-neurovision" "$LOCAL_BIN/fr33d0m-neurovision-shell" "$LOCAL_BIN/fr33d0m-terminal-shell"
 
 # Also keep hermes-* aliases for compatibility
 ln -sf "$LOCAL_BIN/fr33d0m-webui"        "$LOCAL_BIN/hermes-webui"
 ln -sf "$LOCAL_BIN/fr33d0m-neurovision"  "$LOCAL_BIN/hermes-neurovision"
 
-ok "Installed: fr33d0m, fr33d0m-webui, fr33d0m-neurovision"
+ok "Installed: fr33d0m, fr33d0m-refresh-dashboard, fr33d0m-webui, fr33d0m-neurovision"
 
 # Ensure ~/.local/bin is on PATH
 if ! echo "$PATH" | grep -q "$LOCAL_BIN"; then

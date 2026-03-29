@@ -24,6 +24,7 @@ The installer sets up:
 - Browser Neurovision service
 - WebUI service
 - Dashboard runtime controls and skill management
+- Seeded runtime editor config in `~/.hermes/fr33d0m-dashboard.yaml`
 
 ## Recommended Host
 
@@ -50,6 +51,7 @@ The installer:
 - installs missing Ubuntu packages
 - installs Hermes Agent if needed
 - installs Fr33d0m wrappers
+- seeds `~/.hermes/fr33d0m-dashboard.yaml` for runtime Personality and Files editors
 - clones the extension repositories
 - applies the Fr33d0m dashboard patch to `hermes-webui`
 - builds the dashboard frontend
@@ -74,6 +76,7 @@ fr33d0m update
 Additional commands:
 
 ```bash
+fr33d0m-refresh-dashboard
 fr33d0m-webui
 fr33d0m-neurovision
 ```
@@ -147,6 +150,8 @@ After logging in, these are the main routes:
 | `/gateway` | Configure messaging gateways and pairing approvals |
 | `/terminal` | Browser terminal with reconnect controls and full shell access |
 | `/neurovision` | Browser view of Neurovision with reconnect controls |
+| `/personality` | Edit curated runtime-only personality files defined in dashboard settings |
+| `/files` | Browse and edit files under allowlisted runtime roots |
 | `/config` | View config and environment data |
 | `/cron` | Manage scheduled jobs |
 | `/skills` | Browse built-in skills and manage custom skills |
@@ -160,8 +165,19 @@ For most day-to-day administration, you can stay in the dashboard:
 3. Apply `minimax/minimax-m2.7`
 4. Use Start, Stop, Restart, Doctor, or Doctor Fix buttons
 5. Go to `/gateway` to configure platforms and approve/revoke pairing entries
-6. Go to `/skills` to create, edit, or delete custom skills
-7. Use `/terminal` only when you need raw shell access
+6. Go to `/personality` for curated runtime personality updates and `/files` for allowlisted file access
+7. Go to `/skills` to create, edit, or delete custom skills
+8. Use `/terminal` only when you need raw shell access
+
+### Runtime editors
+
+`/personality` is for runtime-only editing. It writes curated files listed in `~/.hermes/fr33d0m-dashboard.yaml`, such as `SOUL.md`, and is meant to update the live Hermes runtime rather than the packaging repo.
+
+`/files` is an allowlist-based file manager. It only exposes roots declared in `~/.hermes/fr33d0m-dashboard.yaml`, keeps `Personality`-owned files on the dedicated editor path, and hides seeded dashboard-maintenance paths such as `~/.hermes/fr33d0m-dashboard.yaml`, `~/.hermes/extensions/hermes-webui`, and `~/.hermes/patches`.
+
+The dashboard has no git push or git commit flow. Runtime edits stay local to the VM. If you need to reapply the packaged patch, refresh backend dependencies, rebuild the frontend, and restart the local service, use `fr33d0m-refresh-dashboard`.
+
+**Warning:** `fr33d0m-refresh-dashboard` now stages a fresh `hermes-webui` clone outside the live tree, reapplies the packaged patch there, refreshes backend dependencies, and rebuilds the frontend before swapping it into place. A successful refresh replaces the installed `~/.hermes/extensions/hermes-webui` tree; if startup fails after the swap, the script attempts to roll back to the previous live tree.
 
 ## Messaging Gateways
 
@@ -342,6 +358,7 @@ Important files:
 ~/.hermes/.env
 ~/.hermes/config.yaml
 ~/.hermes/SOUL.md
+~/.hermes/fr33d0m-dashboard.yaml
 ~/.hermes/auth.json
 ~/.hermes/skins/fr33d0m-skin.yaml
 ~/.hermes/extensions/
@@ -371,6 +388,18 @@ This refreshes:
 - frontend build
 - service definitions
 - browser terminal shell wrapper
+
+On an already provisioned dashboard, `bash install.sh` now routes the WebUI patch and rebuild work through the same staged clone/build/swap path used by `fr33d0m-refresh-dashboard` whenever that safer path is available. Fresh installs still use the direct bootstrap path.
+
+To reapply the already-packaged dashboard patch and rebuild the installed WebUI without doing a repo update, run:
+
+```bash
+fr33d0m-refresh-dashboard
+```
+
+This is a local maintenance command for the installed runtime. It does not commit changes, push branches, or update the packaging repo.
+
+**Warning:** It stages and rebuilds a fresh `hermes-webui` clone before the final swap, but a successful refresh still replaces the installed `~/.hermes/extensions/hermes-webui` tree. If startup fails after the swap, the script attempts to restore the previous live tree.
 
 ## Snapshot Workflow
 

@@ -1,0 +1,22 @@
+# Seeded runtime dashboard config copied into ~/.hermes/fr33d0m-dashboard.yaml.
+
+personality_files:
+  - id: soul
+    label: SOUL
+    root_id: hermes-home
+    path: SOUL.md
+
+file_roots:
+  - id: hermes-home
+    label: Hermes Home
+    path: ~/.hermes
+  - id: downloads
+    label: Downloads
+    path: ~/Downloads
+
+hidden_paths:
+  - ~/.hermes/fr33d0m-dashboard.yaml
+  - ~/.hermes/extensions/hermes-webui
+  - ~/.hermes/patches
+
+max_inline_edit_bytes: 1000000

@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+EXTENSIONS_DIR="$HERMES_HOME/extensions"
+WEBUI_DIR="$HERMES_HOME/extensions/hermes-webui"
+PATCH_FILE="$HERMES_HOME/patches/hermes-webui.patch"
+FRONTEND_DIR="$WEBUI_DIR/frontend"
+LIVE_WEBUI_PYTHON="$WEBUI_DIR/venv/bin/python"
+SERVICE_NAME="fr33d0m-webui.service"
+STAGE_DIR=""
+PREVIOUS_WEBUI_DIR=""
+FAILED_WEBUI_DIR=""
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+
+if [ -d "/run/user/$(id -u)" ]; then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    if [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+    fi
+fi
+
+stage() {
+    printf "\n==> %s\n" "$1"
+}
+
+warn() {
+    printf "WARN: %s\n" "$1"
+}
+
+fail() {
+    printf "ERROR: %s\n" "$1" >&2
+    exit 1
+}
+
+require_path() {
+    local path="$1"
+    local label="$2"
+    [ -e "$path" ] || fail "$label not found at $path"
+}
+
+cleanup() {
+    local exit_code=$?
+    if [ -n "${STAGE_DIR:-}" ] && [ -d "$STAGE_DIR" ]; then
+        rm -rf "$STAGE_DIR"
+    fi
+    return "$exit_code"
+}
+
+restart_or_start_service() {
+    if systemctl --user restart "$SERVICE_NAME"; then
+        return 0
+    fi
+
+    warn "systemctl restart failed for $SERVICE_NAME; trying start"
+    systemctl --user start "$SERVICE_NAME"
+}
+
+rollback_previous_live_tree() {
+    if [ -z "${PREVIOUS_WEBUI_DIR:-}" ] || [ ! -d "$PREVIOUS_WEBUI_DIR" ]; then
+        return 1
+    fi
+
+    stage "Rolling back previous live hermes-webui tree"
+    FAILED_WEBUI_DIR="$EXTENSIONS_DIR/.hermes-webui-failed.$(date +%Y%m%d%H%M%S)"
+    if [ -d "$WEBUI_DIR" ]; then
+        mv "$WEBUI_DIR" "$FAILED_WEBUI_DIR"
+        warn "Preserved failed staged tree at $FAILED_WEBUI_DIR"
+    fi
+    mv "$PREVIOUS_WEBUI_DIR" "$WEBUI_DIR"
+
+    if restart_or_start_service; then
+        warn "Previous live hermes-webui tree restored and service recovered"
+    else
+        warn "Previous live hermes-webui tree restored, but $SERVICE_NAME still needs manual attention"
+    fi
+
+    return 0
+}
+
+trap cleanup EXIT
+
+stage "Validating local paths"
+require_path "$WEBUI_DIR/.git" "Installed hermes-webui clone"
+require_path "$PATCH_FILE" "Fr33dom dashboard patch"
+require_path "$FRONTEND_DIR" "Hermes WebUI frontend directory"
+require_path "$LIVE_WEBUI_PYTHON" "Hermes WebUI backend venv python"
+
+stage "Creating staged hermes-webui clone"
+STAGE_DIR="$(mktemp -d "$EXTENSIONS_DIR/.hermes-webui-stage.XXXXXX")"
+git clone --no-local "$WEBUI_DIR" "$STAGE_DIR"
+
+stage "Applying Fr33dom patch in staging"
+git -C "$STAGE_DIR" apply --check "$PATCH_FILE"
+git -C "$STAGE_DIR" apply --whitespace=nowarn "$PATCH_FILE"
+
+stage "Refreshing backend dependencies in staging"
+STAGED_WEBUI_PYTHON="$STAGE_DIR/venv/bin/python"
+if command -v uv >/dev/null 2>&1; then
+    uv venv "$STAGE_DIR/venv" --python "$LIVE_WEBUI_PYTHON"
+    uv pip install -e "$STAGE_DIR" --python "$STAGED_WEBUI_PYTHON"
+else
+    "$LIVE_WEBUI_PYTHON" -m venv "$STAGE_DIR/venv"
+    "$STAGED_WEBUI_PYTHON" -m pip install -e "$STAGE_DIR"
+fi
+
+stage "Building frontend in staging"
+(
+    cd "$STAGE_DIR/frontend"
+    npm install --silent
+    npx vite build
+)
+
+stage "Swapping staged hermes-webui into place"
+PREVIOUS_WEBUI_DIR="$EXTENSIONS_DIR/.hermes-webui-previous.$(date +%Y%m%d%H%M%S)"
+mv "$WEBUI_DIR" "$PREVIOUS_WEBUI_DIR"
+if mv "$STAGE_DIR" "$WEBUI_DIR"; then
+    STAGE_DIR=""
+else
+    warn "Failed to move staged hermes-webui into place; restoring previous live tree"
+    mv "$PREVIOUS_WEBUI_DIR" "$WEBUI_DIR" || true
+    fail "Could not swap staged hermes-webui into place"
+fi
+
+stage "Restarting fr33d0m-webui"
+if ! restart_or_start_service; then
+    rollback_previous_live_tree || true
+    fail "Dashboard startup failed after swap; rolled back to previous live tree"
+fi
+
+rm -rf "$PREVIOUS_WEBUI_DIR"
+
+stage "Dashboard refresh complete"
+printf "Refreshed %s from a staged clone, reinstalled backend deps, rebuilt frontend, and restarted %s\n" "$WEBUI_DIR" "$SERVICE_NAME"

@@ -21,7 +21,7 @@ source ~/.bashrc
 fr33d0m setup
 ```
 
-The installer handles everything: Hermes Agent, Python/Node.js dependencies, all extensions, the `fr33d0m` command, the Fr33d0m dashboard patch for `hermes-webui`, and systemd autostart services.
+The installer handles everything: Hermes Agent, Python/Node.js dependencies, all extensions, the `fr33d0m` command, the Fr33d0m dashboard patch for `hermes-webui`, the seeded runtime dashboard config at `~/.hermes/fr33d0m-dashboard.yaml`, and systemd autostart services.
 
 ## Documentation
 
@@ -40,6 +40,7 @@ The installer handles everything: Hermes Agent, Python/Node.js dependencies, all
 | `fr33d0m skills list` | Browse available skills |
 | `fr33d0m gateway start` | Start messaging gateway (Telegram, Discord, etc.) |
 | `fr33d0m update` | Update Hermes Agent to latest |
+| `fr33d0m-refresh-dashboard` | Reapply the packaged WebUI patch, refresh backend deps, rebuild the frontend, and restart the local dashboard service |
 | `fr33d0m-webui` | Launch the web dashboard (port 8643) |
 | `fr33d0m-neurovision` | Launch the terminal visualizer |
 
@@ -55,6 +56,8 @@ The Fr33d0m dashboard on port `8643` now acts as the main hub:
 | `/gateway` | Configure messaging gateways with cards, tests, and pairing approval buttons |
 | `/terminal` | Browser terminal with reconnect controls and a full shell welcome banner |
 | `/neurovision` | Browser view of the curses visualizer via `ttyd` with reconnect support |
+| `/personality` | Edit curated runtime-only personality files such as `SOUL.md` |
+| `/files` | Browse and edit files under allowlisted runtime roots without exposing the packaging repo |
 | `/skills` | Manage custom skills: create, edit `SKILL.md`, and delete |
 
 ### Dashboard-first setup flow
@@ -64,7 +67,18 @@ The Fr33d0m dashboard on port `8643` now acts as the main hub:
 3. Apply the default model `minimax/minimax-m2.7`
 4. Use the dashboard buttons to start or restart the gateway
 5. Configure messaging platforms in `/gateway`
-6. Use `/terminal` for shell access and `/skills` for custom skill management
+6. Use `/personality` for curated runtime personality edits and `/files` for allowlisted runtime file management
+7. Use `/terminal` for shell access and `/skills` for custom skill management
+
+### Runtime editors
+
+`/personality` is runtime-only. It edits curated files from `~/.hermes/fr33d0m-dashboard.yaml` and is intended for the live VM, not the packaging repo.
+
+`/files` is an allowlist-based file manager. It only exposes configured roots such as `~/.hermes` and `~/Downloads`, blocks any path managed by `Personality`, and hides seeded dashboard-maintenance paths such as `~/.hermes/fr33d0m-dashboard.yaml`, `~/.hermes/extensions/hermes-webui`, and `~/.hermes/patches`.
+
+The dashboard does not create commits, push branches, or manage git remotes. Use `fr33d0m-refresh-dashboard` as the local maintenance command when you need to reapply the packaged WebUI patch, refresh backend dependencies, rebuild the frontend, and restart `fr33d0m-webui`.
+
+**Warning:** `fr33d0m-refresh-dashboard` now stages a fresh `hermes-webui` clone outside the live tree, reapplies the packaged patch there, refreshes backend dependencies, and rebuilds the frontend before swapping it into place. A successful refresh replaces the installed `~/.hermes/extensions/hermes-webui` tree; if startup fails after the swap, the script attempts to roll back to the previous live tree.
 
 ## Services (autostart on boot)
 
@@ -85,7 +99,7 @@ systemctl --user status fr33d0m-neurovision-web
 
 systemctl --user restart fr33d0m-webui
 systemctl --user stop fr33d0m-gateway
-systemctl --user journal -u fr33d0m-webui -f
+journalctl --user -u fr33d0m-webui -f
 ```
 
 Services survive reboot via `loginctl enable-linger`.
@@ -135,16 +149,19 @@ Fr33dom_bot/
 ├── install.sh                # One-command Ubuntu installer
 ├── .env.example              # API key template
 ├── bin/
-│   ├── fr33d0m               # Main command (wraps hermes)
-│   ├── fr33d0m-terminal-shell # Shell banner used by the browser terminal
-│   ├── fr33d0m-webui         # Web dashboard launcher
-│   └── fr33d0m-neurovision   # Terminal visualizer launcher
+│   ├── fr33d0m                    # Main command (wraps hermes)
+│   ├── fr33d0m-refresh-dashboard  # Reapply WebUI patch, rebuild frontend, restart fr33d0m-webui
+│   ├── fr33d0m-webui              # Web dashboard launcher
+│   ├── fr33d0m-neurovision        # Terminal visualizer launcher
+│   ├── fr33d0m-neurovision-shell  # Shell wrapper for ttyd browser neurovision
+│   └── fr33d0m-terminal-shell     # Shell banner used by the browser terminal
 ├── patches/
 │   └── hermes-webui.patch    # Rebrand + dashboard extensions applied after clone
 ├── systemd/                  # Reference service unit files
 ├── config/
 │   ├── config.yaml           # Display config (fr33d0m-skin active)
-│   └── SOUL.md               # Agent persona
+│   ├── SOUL.md               # Agent persona
+│   └── fr33d0m-dashboard.yaml # Seeded runtime editor config
 ├── skins/
 │   └── fr33d0m-skin.yaml     # Custom theme
 ├── plugins/                  # 34 evey plugins + skill_factory
